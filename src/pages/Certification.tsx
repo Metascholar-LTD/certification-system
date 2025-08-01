@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,10 +16,12 @@ import {
   Users, 
   CheckCircle,
   AlertCircle,
-  Home
+  Home,
+  RefreshCw
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Participant {
   id: string;
@@ -28,62 +30,78 @@ interface Participant {
   course: string;
   completionDate: string;
   status: 'pending' | 'issued' | 'sent';
+  registration_id: string;
+  webinar_date: string;
+  time_zone: string;
 }
 
 export default function Certification() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [participants, setParticipants] = useState<Participant[]>([]);
-  const [csvFile, setCsvFile] = useState<File | null>(null);
   const [certificateTemplate, setCertificateTemplate] = useState<File | null>(null);
   const [emailSubject, setEmailSubject] = useState("Your Certificate from Metascholar Institute");
   const [emailMessage, setEmailMessage] = useState("Congratulations on completing the course! Please find your certificate attached.");
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handleCsvUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file && file.type === 'text/csv') {
-      setCsvFile(file);
-      // Simulate CSV parsing
-      const mockParticipants: Participant[] = [
-        {
-          id: '1',
-          name: 'John Doe',
-          email: 'john.doe@example.com',
-          course: 'Advanced React Development',
-          completionDate: '2024-01-15',
-          status: 'pending'
-        },
-        {
-          id: '2',
-          name: 'Jane Smith',
-          email: 'jane.smith@example.com',
-          course: 'Advanced React Development',
-          completionDate: '2024-01-15',
-          status: 'pending'
-        },
-        {
-          id: '3',
-          name: 'Mike Johnson',
-          email: 'mike.johnson@example.com',
-          course: 'Advanced React Development',
-          completionDate: '2024-01-15',
-          status: 'pending'
-        }
-      ];
-      setParticipants(mockParticipants);
+  // Fetch webhook registrations from database
+  const fetchWebhookRegistrations = async () => {
+    try {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from('webhook_registrations')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching webhook registrations:', error);
+        toast({
+          title: "Error Loading Data",
+          description: "Failed to load participant registrations",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Transform webhook data to participant format
+      const transformedParticipants: Participant[] = data.map((registration) => ({
+        id: registration.id,
+        registration_id: registration.registration_id,
+        name: registration.participant_name,
+        email: registration.participant_email,
+        course: registration.webinar_title,
+        completionDate: new Date(registration.webinar_date).toLocaleDateString(),
+        webinar_date: registration.webinar_date,
+        time_zone: registration.time_zone,
+        status: 'pending' as const
+      }));
+
+      setParticipants(transformedParticipants);
       toast({
-        title: "CSV Uploaded Successfully",
-        description: `Found ${mockParticipants.length} participants`,
+        title: "Data Loaded Successfully",
+        description: `Found ${transformedParticipants.length} registered participants`,
       });
-    } else {
+    } catch (error) {
+      console.error('Unexpected error:', error);
       toast({
-        title: "Invalid File Type",
-        description: "Please upload a valid CSV file",
+        title: "Error",
+        description: "An unexpected error occurred",
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  // Load data on component mount
+  useEffect(() => {
+    fetchWebhookRegistrations();
+  }, []);
+
+  const refreshData = () => {
+    fetchWebhookRegistrations();
   };
 
   const handleCertificateUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -104,10 +122,19 @@ export default function Certification() {
   };
 
   const generateCertificates = async () => {
-    if (!csvFile || !certificateTemplate) {
+    if (!certificateTemplate) {
       toast({
-        title: "Missing Files",
-        description: "Please upload both CSV file and certificate template",
+        title: "Missing Template",
+        description: "Please upload a certificate template",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (participants.length === 0) {
+      toast({
+        title: "No Participants",
+        description: "No registered participants found to generate certificates for",
         variant: "destructive",
       });
       return;
@@ -191,57 +218,33 @@ export default function Certification() {
                 <p className="text-muted-foreground">Metascholar Institute</p>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <Users className="w-5 h-5 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">
-                {participants.length} Participants
-              </span>
+            <div className="flex items-center space-x-4">
+              <Button variant="outline" size="sm" onClick={refreshData} disabled={isLoading}>
+                <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                Refresh Data
+              </Button>
+              <div className="flex items-center space-x-2">
+                <Users className="w-5 h-5 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">
+                  {participants.length} Participants
+                </span>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       <div className="container mx-auto px-4 py-8">
-        <Tabs defaultValue="upload" className="space-y-6">
+        <Tabs defaultValue="participants" className="space-y-6">
           <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="upload">Upload Data</TabsTrigger>
+            <TabsTrigger value="participants">Registered Participants</TabsTrigger>
             <TabsTrigger value="generate">Generate Certificates</TabsTrigger>
             <TabsTrigger value="send">Send Certificates</TabsTrigger>
             <TabsTrigger value="manage">Manage</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="upload" className="space-y-6">
+          <TabsContent value="participants" className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* CSV Upload */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <FileText className="w-5 h-5 mr-2" />
-                    Upload Participant Data
-                  </CardTitle>
-                  <CardDescription>
-                    Upload a CSV file containing participant information including names and email addresses.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid w-full max-w-sm items-center gap-1.5">
-                    <Label htmlFor="csv-upload">CSV File</Label>
-                    <Input 
-                      id="csv-upload" 
-                      type="file" 
-                      accept=".csv"
-                      onChange={handleCsvUpload}
-                    />
-                  </div>
-                  {csvFile && (
-                    <div className="flex items-center text-sm text-green-600">
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      {csvFile.name} uploaded successfully
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
               {/* Certificate Template Upload */}
               <Card>
                 <CardHeader>
@@ -271,15 +274,46 @@ export default function Certification() {
                   )}
                 </CardContent>
               </Card>
-            </div>
 
-            {/* Participants Preview */}
-            {participants.length > 0 && (
+              {/* Stats Card */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Participants Preview</CardTitle>
+                  <CardTitle className="flex items-center">
+                    <Users className="w-5 h-5 mr-2" />
+                    Registration Statistics
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4 text-center">
+                    <div>
+                      <div className="text-2xl font-bold text-blue-600">{participants.length}</div>
+                      <div className="text-sm text-muted-foreground">Total Registered</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-green-600">
+                        {participants.filter(p => p.status === 'sent').length}
+                      </div>
+                      <div className="text-sm text-muted-foreground">Certificates Sent</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Participants List */}
+            {isLoading ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-muted-foreground">Loading registered participants...</p>
+                </CardContent>
+              </Card>
+            ) : participants.length > 0 ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Registered Participants</CardTitle>
                   <CardDescription>
-                    Review the uploaded participant data before proceeding.
+                    Participants registered through webhook integrations.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -290,26 +324,39 @@ export default function Certification() {
                           <th className="text-left p-2">Name</th>
                           <th className="text-left p-2">Email</th>
                           <th className="text-left p-2">Course</th>
+                          <th className="text-left p-2">Date</th>
+                          <th className="text-left p-2">Time Zone</th>
                           <th className="text-left p-2">Status</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {participants.slice(0, 5).map((participant) => (
+                        {participants.map((participant) => (
                           <tr key={participant.id} className="border-b">
                             <td className="p-2">{participant.name}</td>
                             <td className="p-2">{participant.email}</td>
                             <td className="p-2">{participant.course}</td>
+                            <td className="p-2">{participant.completionDate}</td>
+                            <td className="p-2">{participant.time_zone}</td>
                             <td className="p-2">{getStatusBadge(participant.status)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    {participants.length > 5 && (
-                      <p className="text-muted-foreground mt-2 text-center">
-                        ...and {participants.length - 5} more participants
-                      </p>
-                    )}
                   </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <Users className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                  <h3 className="text-lg font-semibold mb-2">No Participants Found</h3>
+                  <p className="text-muted-foreground mb-4">
+                    No webhook registrations have been received yet.
+                  </p>
+                  <Button variant="outline" onClick={refreshData}>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Refresh Data
+                  </Button>
                 </CardContent>
               </Card>
             )}
@@ -339,7 +386,7 @@ export default function Certification() {
                 
                 <Button 
                   onClick={generateCertificates}
-                  disabled={!csvFile || !certificateTemplate || isProcessing}
+                  disabled={!certificateTemplate || isProcessing || participants.length === 0}
                   className="w-full"
                 >
                   <Award className="w-4 h-4 mr-2" />
