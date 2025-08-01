@@ -55,32 +55,15 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Validate UUID format for webinar_id
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(body.webinar_id)) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid webinar_id format' }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      );
-    }
-
-    // Parse participant name into first_name and surname
-    const nameParts = body.participant_name.trim().split(' ');
-    const first_name = nameParts[0] || '';
-    const surname = nameParts.slice(1).join(' ') || '';
-
-    // Check if registration already exists by external_registration_id
+    // Check if registration already exists by registration_id
     const { data: existingRegistration, error: checkError } = await supabase
-      .from('webinar_registrations')
-      .select('id, registration_status')
-      .eq('external_registration_id', body.registration_id)
+      .from('webhook_registrations')
+      .select('id')
+      .eq('registration_id', body.registration_id)
       .maybeSingle();
 
     if (checkError && checkError.code !== 'PGRST116') {
-      console.error('Error checking existing participant:', checkError);
+      console.error('Error checking existing registration:', checkError);
       return new Response(
         JSON.stringify({ error: 'Database error' }),
         { 
@@ -95,12 +78,15 @@ Deno.serve(async (req) => {
     if (existingRegistration) {
       // Update existing registration
       const { data, error } = await supabase
-        .from('webinar_registrations')
+        .from('webhook_registrations')
         .update({
-          first_name,
-          surname,
-          email: body.participant_email,
+          webinar_id: body.webinar_id,
+          webinar_title: body.webinar_title,
+          participant_name: body.participant_name,
+          participant_email: body.participant_email,
           time_zone: body.time_zone,
+          webinar_date: body.webinar_date,
+          webinar_link: body.webinar_link,
           registration_type: body.registration_type
         })
         .eq('id', existingRegistration.id)
@@ -123,16 +109,17 @@ Deno.serve(async (req) => {
     } else {
       // Insert new registration
       const { data, error } = await supabase
-        .from('webinar_registrations')
+        .from('webhook_registrations')
         .insert({
-          email: body.participant_email,
-          first_name,
-          surname,
-          time_zone: body.time_zone,
+          registration_id: body.registration_id,
           webinar_id: body.webinar_id,
-          registration_status: 'registered',
-          registration_type: body.registration_type,
-          external_registration_id: body.registration_id
+          webinar_title: body.webinar_title,
+          participant_name: body.participant_name,
+          participant_email: body.participant_email,
+          time_zone: body.time_zone,
+          webinar_date: body.webinar_date,
+          webinar_link: body.webinar_link,
+          registration_type: body.registration_type
         })
         .select()
         .single();
