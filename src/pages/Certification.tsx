@@ -48,6 +48,8 @@ export default function Certification() {
   const [progress, setProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [certificates, setCertificates] = useState<any[]>([]);
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  const [sendingFor, setSendingFor] = useState<string | null>(null);
 
   // Fetch webhook registrations from database
   const fetchWebhookRegistrations = async () => {
@@ -128,6 +130,146 @@ export default function Certification() {
 
   const refreshData = () => {
     fetchWebhookRegistrations();
+  };
+
+  // Upload certificate for individual participant
+  const uploadCertificateForParticipant = async (participant: Participant, file: File) => {
+    setUploadingFor(participant.id);
+    
+    try {
+      // Convert file to data URL
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+
+      // Generate unique certificate number
+      const certificateNumber = `CERT-${Date.now()}-${participant.name.replace(/\s+/g, '')}`;
+
+      // Check if certificate already exists
+      const { data: existingCert } = await supabase
+        .from('certificates')
+        .select('id')
+        .eq('registration_id', participant.id)
+        .maybeSingle();
+
+      if (existingCert) {
+        // Update existing certificate
+        const { error: updateError } = await supabase
+          .from('certificates')
+          .update({
+            certificate_url: dataUrl,
+            certificate_number: certificateNumber,
+            status: 'issued',
+            issued_at: new Date().toISOString(),
+          })
+          .eq('id', existingCert.id);
+
+        if (updateError) throw updateError;
+      } else {
+        // Create new certificate record
+        const { error: insertError } = await supabase
+          .from('certificates')
+          .insert({
+            registration_id: participant.id,
+            participant_name: participant.name,
+            participant_email: participant.email,
+            certificate_number: certificateNumber,
+            certificate_url: dataUrl,
+            status: 'issued',
+            issued_at: new Date().toISOString(),
+          });
+
+        if (insertError) throw insertError;
+      }
+
+      toast({
+        title: "Certificate Uploaded",
+        description: `Certificate for ${participant.name} has been uploaded successfully`,
+      });
+      
+      // Refresh data
+      await fetchWebhookRegistrations();
+      
+    } catch (error) {
+      console.error('Certificate upload error:', error);
+      toast({
+        title: "Upload Failed",
+        description: error instanceof Error ? error.message : "Failed to upload certificate",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingFor(null);
+    }
+  };
+
+  // Send certificate to individual participant
+  const sendCertificateToParticipant = async (participant: Participant) => {
+    setSendingFor(participant.id);
+    
+    try {
+      // Get certificate for this participant
+      const certificate = certificates.find(cert => cert.registration_id === participant.id);
+      
+      if (!certificate || !certificate.certificate_url) {
+        toast({
+          title: "No Certificate Found",
+          description: `Please upload a certificate for ${participant.name} first`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Send email using Supabase Edge Function
+      const { data: emailResult, error: emailError } = await supabase.functions.invoke('send-certificate-email', {
+        body: {
+          to: participant.email,
+          subject: emailSubject,
+          message: emailMessage,
+          participant_name: participant.name,
+          certificate_number: certificate.certificate_number,
+          certificate_url: certificate.certificate_url
+        }
+      });
+
+      if (emailError) {
+        console.error('Email sending error:', emailError);
+        throw new Error(`Failed to send email to ${participant.email}`);
+      }
+
+      // Update certificate status to sent
+      const { error: updateError } = await supabase
+        .from('certificates')
+        .update({ 
+          status: 'sent', 
+          sent_at: new Date().toISOString() 
+        })
+        .eq('id', certificate.id);
+
+      if (updateError) {
+        console.error('Error updating certificate status:', updateError);
+        throw new Error(`Failed to update certificate status`);
+      }
+
+      toast({
+        title: "Certificate Sent",
+        description: `Certificate successfully sent to ${participant.name} at ${participant.email}`,
+      });
+      
+      // Refresh data
+      await fetchWebhookRegistrations();
+      
+    } catch (error) {
+      console.error('Certificate sending error:', error);
+      toast({
+        title: "Sending Failed",
+        description: error instanceof Error ? error.message : "Failed to send certificate",
+        variant: "destructive",
+      });
+    } finally {
+      setSendingFor(null);
+    }
   };
 
   const handleCertificateUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -435,71 +577,50 @@ export default function Certification() {
 
       <div className="container mx-auto px-4 py-8">
         <Tabs defaultValue="participants" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="participants">Registered Participants</TabsTrigger>
-            <TabsTrigger value="generate">Generate Certificates</TabsTrigger>
-            <TabsTrigger value="send">Send Certificates</TabsTrigger>
-            <TabsTrigger value="manage">Manage</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="participants">Certificate Management</TabsTrigger>
+            <TabsTrigger value="email-settings">Email Settings</TabsTrigger>
+            <TabsTrigger value="gallery">Certificate Gallery</TabsTrigger>
           </TabsList>
 
           <TabsContent value="participants" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Certificate Template Upload */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Award className="w-5 h-5 mr-2" />
-                    Upload Certificate Template
-                  </CardTitle>
-                  <CardDescription>
-                    Upload a PDF or image file that will be used as the certificate template.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid w-full max-w-sm items-center gap-1.5">
-                    <Label htmlFor="certificate-upload">Certificate Template</Label>
-                    <Input 
-                      id="certificate-upload" 
-                      type="file" 
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={handleCertificateUpload}
-                    />
+            {/* Stats Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Users className="w-5 h-5 mr-2" />
+                  Certificate Management Overview
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-4 gap-4 text-center">
+                  <div>
+                    <div className="text-2xl font-bold text-blue-600">{participants.length}</div>
+                    <div className="text-sm text-muted-foreground">Total Registered</div>
                   </div>
-                  {certificateTemplate && (
-                    <div className="flex items-center text-sm text-green-600">
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      {certificateTemplate.name} uploaded successfully
+                  <div>
+                    <div className="text-2xl font-bold text-orange-600">
+                      {participants.filter(p => p.status === 'pending').length}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Stats Card */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Users className="w-5 h-5 mr-2" />
-                    Registration Statistics
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-center">
-                    <div>
-                      <div className="text-2xl font-bold text-blue-600">{participants.length}</div>
-                      <div className="text-sm text-muted-foreground">Total Registered</div>
-                    </div>
-                    <div>
-                      <div className="text-2xl font-bold text-green-600">
-                        {participants.filter(p => p.status === 'sent').length}
-                      </div>
-                      <div className="text-sm text-muted-foreground">Certificates Sent</div>
-                    </div>
+                    <div className="text-sm text-muted-foreground">Pending Certificates</div>
                   </div>
-                </CardContent>
-              </Card>
-            </div>
+                  <div>
+                    <div className="text-2xl font-bold text-purple-600">
+                      {participants.filter(p => p.status === 'issued').length}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Ready to Send</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-green-600">
+                      {participants.filter(p => p.status === 'sent').length}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Certificates Sent</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-            {/* Participants List */}
+            {/* Individual Certificate Management */}
             {isLoading ? (
               <Card>
                 <CardContent className="p-8 text-center">
@@ -510,37 +631,118 @@ export default function Certification() {
             ) : participants.length > 0 ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>Registered Participants</CardTitle>
+                  <CardTitle>Individual Certificate Management</CardTitle>
                   <CardDescription>
-                    Participants registered through webhook integrations.
+                    Upload and send certificates for each participant individually.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left p-2">Name</th>
-                          <th className="text-left p-2">Email</th>
-                          <th className="text-left p-2">Course</th>
-                          <th className="text-left p-2">Date</th>
-                          <th className="text-left p-2">Time Zone</th>
-                          <th className="text-left p-2">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {participants.map((participant) => (
-                          <tr key={participant.id} className="border-b">
-                            <td className="p-2">{participant.name}</td>
-                            <td className="p-2">{participant.email}</td>
-                            <td className="p-2">{participant.course}</td>
-                            <td className="p-2">{participant.completionDate}</td>
-                            <td className="p-2">{participant.time_zone}</td>
-                            <td className="p-2">{getStatusBadge(participant.status)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="space-y-4">
+                    {participants.map((participant) => {
+                      const certificate = certificates.find(cert => cert.registration_id === participant.id);
+                      const isUploading = uploadingFor === participant.id;
+                      const isSending = sendingFor === participant.id;
+                      
+                      return (
+                        <div key={participant.id} className="border rounded-lg p-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-center">
+                            {/* Participant Info */}
+                            <div>
+                              <h4 className="font-semibold">{participant.name}</h4>
+                              <p className="text-sm text-muted-foreground">{participant.email}</p>
+                              <p className="text-xs text-muted-foreground">{participant.course}</p>
+                            </div>
+                            
+                            {/* Certificate Status */}
+                            <div className="text-center">
+                              <div className="mb-2">{getStatusBadge(participant.status)}</div>
+                              {certificate?.certificate_number && (
+                                <p className="text-xs font-mono text-muted-foreground">
+                                  {certificate.certificate_number}
+                                </p>
+                              )}
+                            </div>
+                            
+                            {/* Certificate Upload */}
+                            <div>
+                              <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                style={{ display: 'none' }}
+                                id={`upload-${participant.id}`}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    uploadCertificateForParticipant(participant, file);
+                                  }
+                                }}
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isUploading}
+                                onClick={() => document.getElementById(`upload-${participant.id}`)?.click()}
+                              >
+                                {isUploading ? (
+                                  <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+                                ) : (
+                                  <Upload className="w-3 h-3 mr-1" />
+                                )}
+                                {certificate ? 'Replace' : 'Upload'} Certificate
+                              </Button>
+                            </div>
+                            
+                            {/* Actions */}
+                            <div className="flex gap-2">
+                              {certificate?.certificate_url && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    const newWindow = window.open('', '_blank');
+                                    if (newWindow) {
+                                      newWindow.document.write(`
+                                        <html>
+                                          <head>
+                                            <title>Certificate - ${participant.name}</title>
+                                            <style>
+                                              body { margin: 0; padding: 20px; text-align: center; font-family: Arial, sans-serif; }
+                                              img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+                                              h2 { margin-bottom: 20px; }
+                                            </style>
+                                          </head>
+                                          <body>
+                                            <h2>Certificate for ${participant.name}</h2>
+                                            <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
+                                            <img src="${certificate.certificate_url}" alt="Certificate for ${participant.name}" />
+                                          </body>
+                                        </html>
+                                      `);
+                                    }
+                                  }}
+                                >
+                                  <Eye className="w-3 h-3 mr-1" />
+                                  Preview
+                                </Button>
+                              )}
+                              
+                              <Button
+                                size="sm"
+                                disabled={!certificate?.certificate_url || isSending}
+                                onClick={() => sendCertificateToParticipant(participant)}
+                              >
+                                {isSending ? (
+                                  <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+                                ) : (
+                                  <Mail className="w-3 h-3 mr-1" />
+                                )}
+                                Send Certificate
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -561,49 +763,15 @@ export default function Certification() {
             )}
           </TabsContent>
 
-          <TabsContent value="generate" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Award className="w-5 h-5 mr-2" />
-                  Generate Certificates
-                </CardTitle>
-                <CardDescription>
-                  Generate personalized certificates for all participants.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {isProcessing && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Generating certificates...</span>
-                      <span>{progress}%</span>
-                    </div>
-                    <Progress value={progress} />
-                  </div>
-                )}
-                
-                <Button 
-                  onClick={generateCertificates}
-                  disabled={!certificateTemplate || isProcessing || participants.length === 0}
-                  className="w-full"
-                >
-                  <Award className="w-4 h-4 mr-2" />
-                  Generate Certificates
-                </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="send" className="space-y-6">
+          <TabsContent value="email-settings" className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Mail className="w-5 h-5 mr-2" />
-                  Send Certificates
+                  Email Configuration
                 </CardTitle>
                 <CardDescription>
-                  Configure email settings and send certificates to participants.
+                  Configure email settings for certificate delivery.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -614,6 +782,7 @@ export default function Certification() {
                       id="email-subject"
                       value={emailSubject}
                       onChange={(e) => setEmailSubject(e.target.value)}
+                      placeholder="Your Certificate from Metascholar Institute"
                     />
                   </div>
                   <div>
@@ -623,38 +792,32 @@ export default function Certification() {
                       value={emailMessage}
                       onChange={(e) => setEmailMessage(e.target.value)}
                       rows={4}
+                      placeholder="Congratulations on completing the course! Please find your certificate attached."
                     />
                   </div>
                 </div>
-
-                {isProcessing && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Sending certificates...</span>
-                      <span>{progress}%</span>
-                    </div>
-                    <Progress value={progress} />
+                
+                <div className="bg-muted p-4 rounded-lg">
+                  <h4 className="font-semibold mb-2">Email Configuration</h4>
+                  <div className="text-sm text-muted-foreground space-y-1">
+                    <p><strong>From:</strong> Metascholar Institute &lt;support@academicdigital.space&gt;</p>
+                    <p><strong>SMTP Server:</strong> smtp.titan.email:587 (TLS)</p>
+                    <p><strong>Status:</strong> <span className="text-green-600">✓ Configured</span></p>
                   </div>
-                )}
-
-                <Button 
-                  onClick={sendCertificates}
-                  disabled={participants.filter(p => p.status === 'issued').length === 0 || isProcessing}
-                  className="w-full"
-                >
-                  <Mail className="w-4 h-4 mr-2" />
-                  Send Certificates
-                </Button>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="manage" className="space-y-6">
+          <TabsContent value="gallery" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Manage Certificates</CardTitle>
+                <CardTitle className="flex items-center">
+                  <FileImage className="w-5 h-5 mr-2" />
+                  Certificate Gallery
+                </CardTitle>
                 <CardDescription>
-                  View and manage all generated certificates with preview.
+                  View all uploaded certificates in a visual gallery.
                 </CardDescription>
               </CardHeader>
               <CardContent>

@@ -109,15 +109,15 @@ Deno.serve(async (req) => {
       </html>
     `;
 
-    // Send email using SMTP (Titan Email)
+    // Send email using SMTP (from environment variables)
     const client = new SMTPClient({
       connection: {
-        hostname: "smtp.titan.email",
-        port: 587,
-        tls: true,
+        hostname: Deno.env.get('MAIL_HOST') || "smtp.titan.email",
+        port: parseInt(Deno.env.get('MAIL_PORT') || "587"),
+        tls: Deno.env.get('MAIL_ENCRYPTION') === 'tls',
         auth: {
-          username: "support@academicdigital.space",
-          password: "Metascholar@2025",
+          username: Deno.env.get('MAIL_USERNAME') || "support@academicdigital.space",
+          password: Deno.env.get('MAIL_PASSWORD') || "Metascholar@2025",
         },
       },
     });
@@ -125,8 +125,11 @@ Deno.serve(async (req) => {
     console.log('Sending email via SMTP to:', emailData.to);
 
     try {
+      const fromName = Deno.env.get('MAIL_FROM_NAME') || "Metascholar Institute";
+      const fromAddress = Deno.env.get('MAIL_FROM_ADDRESS') || "support@academicdigital.space";
+      
       await client.send({
-        from: "Metascholar Institute <support@academicdigital.space>",
+        from: `${fromName} <${fromAddress}>`,
         to: emailData.to,
         subject: emailData.subject,
         content: "auto",
