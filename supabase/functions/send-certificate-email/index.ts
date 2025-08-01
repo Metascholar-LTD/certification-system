@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -108,42 +109,38 @@ Deno.serve(async (req) => {
       </html>
     `;
 
-    // For now, we'll simulate email sending
-    // In production, you would integrate with services like:
-    // - SendGrid (https://sendgrid.com/)
-    // - Resend (https://resend.com/)
-    // - AWS SES
-    // - Mailgun
-    
-    console.log('Email would be sent to:', emailData.to);
-    console.log('Subject:', emailData.subject);
-    console.log('HTML Content Length:', htmlContent.length);
-
-    // Simulate email sending delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Here you would actually send the email using your preferred service
-    // Example with Resend:
-    /*
-    const resendApiKey = Deno.env.get('RESEND_API_KEY');
-    const emailResponse = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json',
+    // Send email using SMTP (Titan Email)
+    const client = new SMTPClient({
+      connection: {
+        hostname: "smtp.titan.email",
+        port: 587,
+        tls: true,
+        auth: {
+          username: "support@academicdigital.space",
+          password: "Metascholar@2025",
+        },
       },
-      body: JSON.stringify({
-        from: 'certificates@metascholar.institute',
-        to: [emailData.to],
-        subject: emailData.subject,
-        html: htmlContent,
-      }),
     });
 
-    if (!emailResponse.ok) {
-      throw new Error('Failed to send email');
+    console.log('Sending email via SMTP to:', emailData.to);
+
+    try {
+      await client.send({
+        from: "Metascholar Institute <support@academicdigital.space>",
+        to: emailData.to,
+        subject: emailData.subject,
+        content: "auto",
+        html: htmlContent,
+      });
+
+      console.log('Email sent successfully via SMTP');
+      
+      await client.close();
+    } catch (smtpError) {
+      console.error('SMTP sending error:', smtpError);
+      await client.close();
+      throw new Error(`Failed to send email via SMTP: ${smtpError.message}`);
     }
-    */
 
     return new Response(
       JSON.stringify({ 
