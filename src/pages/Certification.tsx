@@ -699,25 +699,169 @@ export default function Certification() {
                                   variant="outline"
                                   size="sm"
                                   onClick={() => {
-                                    const newWindow = window.open('', '_blank');
+                                    const previewUrl = `/certificate-preview?id=${certificate.id}&name=${encodeURIComponent(participant.name)}&number=${encodeURIComponent(certificate.certificate_number)}`;
+                                    
+                                    // Create a temporary URL for the image
+                                    const imageUrl = certificate.certificate_url;
+                                    
+                                    const newWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes,resizable=yes');
                                     if (newWindow) {
                                       newWindow.document.write(`
+                                        <!DOCTYPE html>
                                         <html>
                                           <head>
-                                            <title>Certificate - ${participant.name}</title>
+                                            <meta charset="utf-8">
+                                            <title>Certificate Preview - ${participant.name}</title>
                                             <style>
-                                              body { margin: 0; padding: 20px; text-align: center; font-family: Arial, sans-serif; }
-                                              img { max-width: 100%; height: auto; border: 1px solid #ddd; }
-                                              h2 { margin-bottom: 20px; }
+                                              body { 
+                                                margin: 0; 
+                                                padding: 20px; 
+                                                text-align: center; 
+                                                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                                                background: #f5f5f5;
+                                              }
+                                              .container {
+                                                max-width: 900px;
+                                                margin: 0 auto;
+                                                background: white;
+                                                border-radius: 10px;
+                                                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                                                padding: 30px;
+                                              }
+                                              h1 { 
+                                                color: #2563eb; 
+                                                margin-bottom: 10px;
+                                                font-size: 28px;
+                                              }
+                                              .info {
+                                                background: #f8fafc;
+                                                padding: 15px;
+                                                border-radius: 8px;
+                                                margin: 20px 0;
+                                                border-left: 4px solid #2563eb;
+                                              }
+                                              .certificate-container {
+                                                margin: 20px 0;
+                                                border: 2px solid #e5e7eb;
+                                                border-radius: 10px;
+                                                overflow: hidden;
+                                                display: inline-block;
+                                                background: white;
+                                              }
+                                              .certificate-img { 
+                                                max-width: 100%; 
+                                                height: auto; 
+                                                display: block;
+                                              }
+                                              .loading {
+                                                padding: 40px;
+                                                color: #666;
+                                              }
+                                              .error {
+                                                padding: 40px;
+                                                color: #dc2626;
+                                                background: #fef2f2;
+                                                border-radius: 8px;
+                                                margin: 20px 0;
+                                              }
+                                              .actions {
+                                                margin-top: 20px;
+                                              }
+                                              .btn {
+                                                background: #2563eb;
+                                                color: white;
+                                                padding: 10px 20px;
+                                                border: none;
+                                                border-radius: 6px;
+                                                margin: 0 10px;
+                                                cursor: pointer;
+                                                font-size: 14px;
+                                              }
+                                              .btn:hover {
+                                                background: #1d4ed8;
+                                              }
+                                              .btn-secondary {
+                                                background: #6b7280;
+                                              }
+                                              .btn-secondary:hover {
+                                                background: #4b5563;
+                                              }
                                             </style>
                                           </head>
                                           <body>
-                                            <h2>Certificate for ${participant.name}</h2>
-                                            <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
-                                            <img src="${certificate.certificate_url}" alt="Certificate for ${participant.name}" />
+                                            <div class="container">
+                                              <h1>🎓 Certificate Preview</h1>
+                                              
+                                              <div class="info">
+                                                <p><strong>Participant:</strong> ${participant.name}</p>
+                                                <p><strong>Email:</strong> ${participant.email}</p>
+                                                <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
+                                                <p><strong>Course:</strong> ${participant.course}</p>
+                                              </div>
+                                              
+                                              <div class="certificate-container">
+                                                <div id="loading" class="loading">
+                                                  Loading certificate...
+                                                </div>
+                                                <img 
+                                                  id="certificateImg" 
+                                                  class="certificate-img" 
+                                                  style="display: none;"
+                                                  alt="Certificate for ${participant.name}"
+                                                  onload="
+                                                    document.getElementById('loading').style.display = 'none';
+                                                    this.style.display = 'block';
+                                                  "
+                                                  onerror="
+                                                    document.getElementById('loading').style.display = 'none';
+                                                    document.getElementById('error').style.display = 'block';
+                                                  "
+                                                />
+                                                <div id="error" class="error" style="display: none;">
+                                                  ❌ Failed to load certificate image.<br>
+                                                  The image may be corrupted or in an unsupported format.
+                                                </div>
+                                              </div>
+                                              
+                                              <div class="actions">
+                                                <button class="btn" onclick="downloadCertificate()">
+                                                  📥 Download Certificate
+                                                </button>
+                                                <button class="btn btn-secondary" onclick="window.close()">
+                                                  ✕ Close Preview
+                                                </button>
+                                              </div>
+                                            </div>
+                                            
+                                            <script>
+                                              // Set the image source after the page loads
+                                              document.addEventListener('DOMContentLoaded', function() {
+                                                const img = document.getElementById('certificateImg');
+                                                const imageData = ${JSON.stringify(certificate.certificate_url)};
+                                                
+                                                if (imageData) {
+                                                  img.src = imageData;
+                                                } else {
+                                                  document.getElementById('loading').style.display = 'none';
+                                                  document.getElementById('error').style.display = 'block';
+                                                  document.getElementById('error').innerHTML = '❌ No certificate data found.';
+                                                }
+                                              });
+                                              
+                                              function downloadCertificate() {
+                                                const link = document.createElement('a');
+                                                const imageData = ${JSON.stringify(certificate.certificate_url)};
+                                                link.href = imageData;
+                                                link.download = 'Certificate_${participant.name.replace(/[^a-zA-Z0-9]/g, '_')}_${certificate.certificate_number}.png';
+                                                document.body.appendChild(link);
+                                                link.click();
+                                                document.body.removeChild(link);
+                                              }
+                                            </script>
                                           </body>
                                         </html>
                                       `);
+                                      newWindow.document.close();
                                     }
                                   }}
                                 >
@@ -939,25 +1083,118 @@ export default function Certification() {
                               alt={`Certificate for ${certificate.participant_name}`}
                               className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
                               onClick={() => {
-                                const newWindow = window.open('', '_blank');
+                                const newWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes,resizable=yes');
                                 if (newWindow) {
                                   newWindow.document.write(`
+                                    <!DOCTYPE html>
                                     <html>
                                       <head>
-                                        <title>Certificate - ${certificate.participant_name}</title>
+                                        <meta charset="utf-8">
+                                        <title>Certificate Preview - ${certificate.participant_name}</title>
                                         <style>
-                                          body { margin: 0; padding: 20px; text-align: center; font-family: Arial, sans-serif; }
-                                          img { max-width: 100%; height: auto; border: 1px solid #ddd; }
-                                          h2 { margin-bottom: 20px; }
+                                          body { 
+                                            margin: 0; 
+                                            padding: 20px; 
+                                            text-align: center; 
+                                            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                                            background: #f5f5f5;
+                                          }
+                                          .container {
+                                            max-width: 900px;
+                                            margin: 0 auto;
+                                            background: white;
+                                            border-radius: 10px;
+                                            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                                            padding: 30px;
+                                          }
+                                          h1 { 
+                                            color: #2563eb; 
+                                            margin-bottom: 10px;
+                                            font-size: 28px;
+                                          }
+                                          .info {
+                                            background: #f8fafc;
+                                            padding: 15px;
+                                            border-radius: 8px;
+                                            margin: 20px 0;
+                                            border-left: 4px solid #2563eb;
+                                          }
+                                          .certificate-img { 
+                                            max-width: 100%; 
+                                            height: auto; 
+                                            border: 2px solid #e5e7eb;
+                                            border-radius: 10px;
+                                            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                                          }
+                                          .actions {
+                                            margin-top: 20px;
+                                          }
+                                          .btn {
+                                            background: #2563eb;
+                                            color: white;
+                                            padding: 10px 20px;
+                                            border: none;
+                                            border-radius: 6px;
+                                            margin: 0 10px;
+                                            cursor: pointer;
+                                            font-size: 14px;
+                                          }
+                                          .btn:hover {
+                                            background: #1d4ed8;
+                                          }
+                                          .btn-secondary {
+                                            background: #6b7280;
+                                          }
+                                          .btn-secondary:hover {
+                                            background: #4b5563;
+                                          }
                                         </style>
                                       </head>
                                       <body>
-                                        <h2>Certificate for ${certificate.participant_name}</h2>
-                                        <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
-                                        <img src="${certificate.certificate_url}" alt="Certificate for ${certificate.participant_name}" />
+                                        <div class="container">
+                                          <h1>🎓 Certificate Preview</h1>
+                                          
+                                          <div class="info">
+                                            <p><strong>Participant:</strong> ${certificate.participant_name}</p>
+                                            <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
+                                            <p><strong>Status:</strong> ${certificate.status}</p>
+                                          </div>
+                                          
+                                          <img 
+                                            src="${certificate.certificate_url}" 
+                                            alt="Certificate for ${certificate.participant_name}"
+                                            class="certificate-img"
+                                            onload="console.log('Certificate image loaded successfully')"
+                                            onerror="console.error('Failed to load certificate image'); this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjNmNGY2Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzZiNzI4MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkZhaWxlZCB0byBsb2FkIGNlcnRpZmljYXRlPC90ZXh0Pjwvc3ZnPic='"
+                                          />
+                                          
+                                          <div class="actions">
+                                            <button class="btn" onclick="downloadCertificate()">
+                                              📥 Download Certificate
+                                            </button>
+                                            <button class="btn btn-secondary" onclick="window.close()">
+                                              ✕ Close Preview
+                                            </button>
+                                          </div>
+                                        </div>
+                                        
+                                        <script>
+                                          function downloadCertificate() {
+                                            const link = document.createElement('a');
+                                            link.href = "${certificate.certificate_url}";
+                                            link.download = "Certificate_${certificate.participant_name.replace(/[^a-zA-Z0-9]/g, '_')}_${certificate.certificate_number}.png";
+                                            document.body.appendChild(link);
+                                            link.click();
+                                            document.body.removeChild(link);
+                                          }
+                                          
+                                          // Debug: Log the certificate URL
+                                          console.log('Certificate URL:', "${certificate.certificate_url}");
+                                        </script>
                                       </body>
                                     </html>
                                   `);
+                                  newWindow.document.close();
                                 }
                               }}
                             />
