@@ -1,9 +1,9 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+};
 
 interface EmailRequest {
   to: string;
@@ -14,30 +14,21 @@ interface EmailRequest {
   certificate_url: string;
 }
 
-Deno.serve(async (req) => {
+const handler = async (req: Request): Promise<Response> => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
+  if (req.method !== 'POST') {
+    return new Response('Method not allowed', { 
+      status: 405, 
+      headers: corsHeaders 
+    });
+  }
+
   try {
-    // Initialize Supabase client
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    if (req.method !== 'POST') {
-      return new Response(
-        JSON.stringify({ error: 'Method not allowed' }),
-        { 
-          status: 405, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      );
-    }
-
-    const emailData = await req.json() as EmailRequest;
+    const emailData: EmailRequest = await req.json();
     console.log('Sending certificate email:', emailData);
 
     // Validate required fields
@@ -46,7 +37,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: 'Missing required fields: to, participant_name, certificate_url' }),
         { 
           status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         }
       );
     }
@@ -108,52 +99,100 @@ Deno.serve(async (req) => {
       </html>
     `;
 
-    console.log('Sending email via Supabase to:', emailData.to);
+    // Send email using SMTP
+    const smtpConfig = {
+      hostname: "smtp.titan.email",
+      port: 465,
+      username: "support@academicdigital.space",
+      password: Deno.env.get('SMTP_PASSWORD') || '',
+    };
 
     try {
-      // Send email using Supabase's built-in email service
-      const { data, error } = await supabase.auth.admin.sendRawEmail({
-        to: emailData.to,
-        subject: emailData.subject,
-        html: htmlContent,
+      // Port 465 uses direct TLS connection (SMTPS)
+      const conn = await Deno.connectTls({
+        hostname: smtpConfig.hostname,
+        port: smtpConfig.port,
       });
 
-      if (error) {
-        console.error('Supabase email sending error:', error);
-        throw new Error(`Failed to send email via Supabase: ${error.message}`);
-      }
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
 
-      console.log('Email sent successfully via Supabase');
+      // Helper function to send command and read response
+      const sendCommand = async (command: string) => {
+        await conn.write(encoder.encode(command + '\r\n'));
+        const buffer = new Uint8Array(1024);
+        const n = await conn.read(buffer);
+        const response = decoder.decode(buffer.subarray(0, n || 0));
+        console.log(`SMTP Command: ${command}`);
+        console.log(`SMTP Response: ${response}`);
+        return response;
+      };
+
+      // SMTP conversation for port 465 (direct TLS)
+      await sendCommand(`EHLO ${smtpConfig.hostname}`);
+      await sendCommand('AUTH LOGIN');
+      await sendCommand(btoa(smtpConfig.username));
+      await sendCommand(btoa(smtpConfig.password));
+      await sendCommand(`MAIL FROM:<${smtpConfig.username}>`);
+      await sendCommand(`RCPT TO:<${emailData.to}>`);
+      await sendCommand('DATA');
       
-    } catch (emailError) {
-      console.error('Email sending error:', emailError);
-      throw new Error(`Failed to send email: ${emailError.message}`);
-    }
+      const emailData_smtp = `From: "Metascholar Institute" <${smtpConfig.username}>
+To: ${emailData.to}
+Subject: ${emailData.subject}
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
 
+${htmlContent}
+.`;
+
+      await sendCommand(emailData_smtp);
+      await sendCommand('QUIT');
+      
+      conn.close();
+      
+      console.log('Certificate email sent successfully via SMTP');
+    } catch (smtpError: any) {
+      console.error('SMTP sending failed:', smtpError);
+      throw new Error(`Failed to send email: ${smtpError.message}`);
+    }
+    
     return new Response(
       JSON.stringify({ 
         success: true, 
         message: 'Certificate email sent successfully',
-        recipient: emailData.to,
-        certificate_number: emailData.certificate_number
+        details: {
+          to: emailData.to,
+          subject: emailData.subject,
+          from: 'support@academicdigital.space',
+          certificate_number: emailData.certificate_number
+        }
       }),
       {
         status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
       }
     );
 
-  } catch (error) {
-    console.error('Email sending error:', error);
+  } catch (error: any) {
+    console.error('Error sending certificate email:', error);
     return new Response(
       JSON.stringify({ 
-        error: 'Failed to send email',
-        details: error instanceof Error ? error.message : 'Unknown error'  
+        error: 'Failed to send certificate email', 
+        details: error.message 
       }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      {
+        status: 500,
+        headers: { 
+          'Content-Type': 'application/json', 
+          ...corsHeaders 
+        },
       }
     );
   }
-});
+};
+
+serve(handler);
