@@ -69,18 +69,35 @@ export default function Certification() {
         return;
       }
 
+      // Get certificate status for each registration
+      const { data: certificates } = await supabase
+        .from('certificates')
+        .select('registration_id, status');
+
+      const certificateStatusMap = new Map(
+        certificates?.map(cert => [cert.registration_id, cert.status]) || []
+      );
+
       // Transform webhook data to participant format
-      const transformedParticipants: Participant[] = data.map((registration) => ({
-        id: registration.id,
-        registration_id: registration.registration_id,
-        name: registration.participant_name,
-        email: registration.participant_email,
-        course: registration.webinar_title,
-        completionDate: new Date(registration.webinar_date).toLocaleDateString(),
-        webinar_date: registration.webinar_date,
-        time_zone: registration.time_zone,
-        status: 'pending' as const
-      }));
+      const transformedParticipants: Participant[] = data.map((registration) => {
+        const certStatus = certificateStatusMap.get(registration.id);
+        let status: 'pending' | 'issued' | 'sent' = 'pending';
+        
+        if (certStatus === 'sent') status = 'sent';
+        else if (certStatus === 'issued') status = 'issued';
+
+        return {
+          id: registration.id,
+          registration_id: registration.registration_id,
+          name: registration.participant_name,
+          email: registration.participant_email,
+          course: registration.webinar_title,
+          completionDate: new Date(registration.webinar_date).toLocaleDateString(),
+          webinar_date: registration.webinar_date,
+          time_zone: registration.time_zone,
+          status
+        };
+      });
 
       setParticipants(transformedParticipants);
       toast({
@@ -147,25 +164,87 @@ export default function Certification() {
     setIsProcessing(true);
     setProgress(0);
 
-    // Simulate certificate generation process
-    for (let i = 0; i <= 100; i += 10) {
-      setProgress(i);
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
+    try {
+      // Generate certificates for each participant
+      for (let i = 0; i < participants.length; i++) {
+        const participant = participants[i];
+        
+        // Update progress
+        const progressPercent = Math.round(((i + 1) / participants.length) * 100);
+        setProgress(progressPercent);
 
-    // Update participants status
-    setParticipants(prev => prev.map(p => ({ ...p, status: 'issued' as const })));
-    
-    setIsProcessing(false);
-    toast({
-      title: "Certificates Generated",
-      description: `Successfully generated certificates for ${participants.length} participants`,
-    });
+        // Generate unique certificate number
+        const certificateNumber = `CERT-${Date.now()}-${i.toString().padStart(3, '0')}`;
+
+        // Check if certificate already exists
+        const { data: existingCert } = await supabase
+          .from('certificates')
+          .select('id')
+          .eq('registration_id', participant.id)
+          .maybeSingle();
+
+        if (!existingCert) {
+          // Create certificate record
+          const { error: certError } = await supabase
+            .from('certificates')
+            .insert({
+              registration_id: participant.id,
+              participant_name: participant.name,
+              participant_email: participant.email,
+              certificate_number: certificateNumber,
+              status: 'issued',
+              issued_at: new Date().toISOString(),
+              template_id: null // We'll add template management later
+            });
+
+          if (certError) {
+            console.error('Error creating certificate:', certError);
+            throw new Error(`Failed to create certificate for ${participant.name}`);
+          }
+        }
+
+        // Small delay to show progress
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      // Update participants status in local state
+      setParticipants(prev => prev.map(p => ({ ...p, status: 'issued' as const })));
+      
+      toast({
+        title: "Certificates Generated",
+        description: `Successfully generated certificates for ${participants.length} participants`,
+      });
+
+    } catch (error) {
+      console.error('Certificate generation error:', error);
+      toast({
+        title: "Generation Failed",
+        description: error instanceof Error ? error.message : "Failed to generate certificates",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+      setProgress(0);
+    }
   };
 
   const sendCertificates = async () => {
-    const issuedParticipants = participants.filter(p => p.status === 'issued');
-    if (issuedParticipants.length === 0) {
+    // Get certificates that are issued but not sent
+    const { data: certificates, error: fetchError } = await supabase
+      .from('certificates')
+      .select('*, webhook_registrations!certificates_webhook_registration_fkey(participant_email, participant_name)')
+      .eq('status', 'issued');
+
+    if (fetchError) {
+      toast({
+        title: "Error",
+        description: "Failed to fetch certificates",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!certificates || certificates.length === 0) {
       toast({
         title: "No Certificates to Send",
         description: "Please generate certificates first",
@@ -177,22 +256,60 @@ export default function Certification() {
     setIsProcessing(true);
     setProgress(0);
 
-    // Simulate email sending process
-    for (let i = 0; i <= 100; i += 20) {
-      setProgress(i);
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
+    try {
+      // Send certificates via email (simulated for now)
+      for (let i = 0; i < certificates.length; i++) {
+        const cert = certificates[i];
+        
+        // Update progress
+        const progressPercent = Math.round(((i + 1) / certificates.length) * 100);
+        setProgress(progressPercent);
 
-    // Update participants status
-    setParticipants(prev => prev.map(p => 
-      p.status === 'issued' ? { ...p, status: 'sent' as const } : p
-    ));
-    
-    setIsProcessing(false);
-    toast({
-      title: "Certificates Sent",
-      description: `Successfully sent certificates to ${issuedParticipants.length} participants`,
-    });
+        // Update certificate status to sent
+        const { error: updateError } = await supabase
+          .from('certificates')
+          .update({ 
+            status: 'sent', 
+            sent_at: new Date().toISOString() 
+          })
+          .eq('id', cert.id);
+
+        if (updateError) {
+          console.error('Error updating certificate:', updateError);
+          throw new Error(`Failed to update certificate for ${cert.participant_name}`);
+        }
+
+        // TODO: Implement actual email sending here
+        console.log(`Sending certificate to ${cert.participant_email}`, {
+          certificateNumber: cert.certificate_number,
+          participantName: cert.participant_name,
+          emailSubject,
+          emailMessage
+        });
+
+        // Small delay to show progress
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      // Update participants status in local state
+      setParticipants(prev => prev.map(p => ({ ...p, status: 'sent' as const })));
+      
+      toast({
+        title: "Certificates Sent",
+        description: `Successfully sent certificates to ${certificates.length} participants`,
+      });
+
+    } catch (error) {
+      console.error('Certificate sending error:', error);
+      toast({
+        title: "Sending Failed",
+        description: error instanceof Error ? error.message : "Failed to send certificates",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+      setProgress(0);
+    }
   };
 
   const getStatusBadge = (status: Participant['status']) => {

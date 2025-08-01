@@ -46,10 +46,13 @@ export type Database = {
       }
       certificates: {
         Row: {
+          certificate_number: string | null
           certificate_url: string | null
           created_at: string
           id: string
           issued_at: string | null
+          participant_email: string | null
+          participant_name: string | null
           registration_id: string
           sent_at: string | null
           status: string
@@ -57,10 +60,13 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          certificate_number?: string | null
           certificate_url?: string | null
           created_at?: string
           id?: string
           issued_at?: string | null
+          participant_email?: string | null
+          participant_name?: string | null
           registration_id: string
           sent_at?: string | null
           status?: string
@@ -68,10 +74,13 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          certificate_number?: string | null
           certificate_url?: string | null
           created_at?: string
           id?: string
           issued_at?: string | null
+          participant_email?: string | null
+          participant_name?: string | null
           registration_id?: string
           sent_at?: string | null
           status?: string
