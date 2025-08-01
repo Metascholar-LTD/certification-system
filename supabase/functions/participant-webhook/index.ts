@@ -5,16 +5,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-interface ParticipantData {
+interface WebinarRegistrationData {
   email: string;
-  first_name?: string;
-  last_name?: string;
+  first_name: string;
+  surname: string;
   phone?: string;
   company?: string;
   job_title?: string;
-  webinar_id?: string;
-  course: string;
-  completion_date?: string;
+  time_zone: string;
+  webinar_id: string;
 }
 
 Deno.serve(async (req) => {
@@ -40,13 +39,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    const body = await req.json() as ParticipantData;
-    console.log('Received participant data:', body);
+    const body = await req.json() as WebinarRegistrationData;
+    console.log('Received webinar registration data:', body);
 
     // Validate required fields
-    if (!body.email || !body.course) {
+    if (!body.email || !body.first_name || !body.surname || !body.time_zone || !body.webinar_id) {
       return new Response(
-        JSON.stringify({ error: 'Email and course are required' }),
+        JSON.stringify({ error: 'Email, first_name, surname, time_zone, and webinar_id are required' }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -54,12 +53,24 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check if participant already exists
-    const { data: existingParticipant, error: checkError } = await supabase
-      .from('participants')
-      .select('id, status')
+    // Validate UUID format for webinar_id
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(body.webinar_id)) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid webinar_id format' }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    // Check if registration already exists
+    const { data: existingRegistration, error: checkError } = await supabase
+      .from('webinar_registrations')
+      .select('id, registration_status')
       .eq('email', body.email)
-      .eq('course', body.course)
+      .eq('webinar_id', body.webinar_id)
       .single();
 
     if (checkError && checkError.code !== 'PGRST116') {
@@ -75,28 +86,26 @@ Deno.serve(async (req) => {
 
     let result;
     
-    if (existingParticipant) {
-      // Update existing participant
+    if (existingRegistration) {
+      // Update existing registration
       const { data, error } = await supabase
-        .from('participants')
+        .from('webinar_registrations')
         .update({
           first_name: body.first_name,
-          last_name: body.last_name,
+          surname: body.surname,
           phone: body.phone,
           company: body.company,
           job_title: body.job_title,
-          webinar_id: body.webinar_id,
-          completion_date: body.completion_date ? new Date(body.completion_date).toISOString() : null,
-          status: body.completion_date ? 'completed' : 'registered'
+          time_zone: body.time_zone
         })
-        .eq('id', existingParticipant.id)
+        .eq('id', existingRegistration.id)
         .select()
         .single();
 
       if (error) {
-        console.error('Error updating participant:', error);
+        console.error('Error updating registration:', error);
         return new Response(
-          JSON.stringify({ error: 'Failed to update participant' }),
+          JSON.stringify({ error: 'Failed to update registration' }),
           { 
             status: 500, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -105,30 +114,29 @@ Deno.serve(async (req) => {
       }
 
       result = data;
-      console.log('Updated participant:', result);
+      console.log('Updated registration:', result);
     } else {
-      // Insert new participant
+      // Insert new registration
       const { data, error } = await supabase
-        .from('participants')
+        .from('webinar_registrations')
         .insert({
           email: body.email,
           first_name: body.first_name,
-          last_name: body.last_name,
+          surname: body.surname,
           phone: body.phone,
           company: body.company,
           job_title: body.job_title,
+          time_zone: body.time_zone,
           webinar_id: body.webinar_id,
-          course: body.course,
-          completion_date: body.completion_date ? new Date(body.completion_date).toISOString() : null,
-          status: body.completion_date ? 'completed' : 'registered'
+          registration_status: 'registered'
         })
         .select()
         .single();
 
       if (error) {
-        console.error('Error inserting participant:', error);
+        console.error('Error inserting registration:', error);
         return new Response(
-          JSON.stringify({ error: 'Failed to create participant' }),
+          JSON.stringify({ error: 'Failed to create registration' }),
           { 
             status: 500, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -137,14 +145,14 @@ Deno.serve(async (req) => {
       }
 
       result = data;
-      console.log('Created new participant:', result);
+      console.log('Created new registration:', result);
     }
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        participant: result,
-        action: existingParticipant ? 'updated' : 'created'
+        registration: result,
+        action: existingRegistration ? 'updated' : 'created'
       }),
       {
         status: 200,
