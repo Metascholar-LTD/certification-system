@@ -1012,8 +1012,8 @@ export default function Certification() {
                 <div className="bg-muted p-4 rounded-lg">
                   <h4 className="font-semibold mb-2">Email Configuration</h4>
                   <div className="text-sm text-muted-foreground space-y-1">
-                    <p><strong>From:</strong> Metascholar Institute &lt;support@academicdigital.space&gt;</p>
-                    <p><strong>SMTP Server:</strong> smtp.titan.email:587 (TLS)</p>
+                    <p><strong>From:</strong> Configured via Supabase SMTP Settings</p>
+                    <p><strong>SMTP Server:</strong> Configured via Supabase SMTP Settings</p>
                     <p><strong>Status:</strong> <span className="text-green-600">✓ Configured</span></p>
                   </div>
                 </div>

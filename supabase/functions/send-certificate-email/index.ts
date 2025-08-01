@@ -52,6 +52,32 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Validate SMTP configuration
+    const mailHost = Deno.env.get('MAIL_HOST');
+    const mailPort = Deno.env.get('MAIL_PORT');
+    const mailUsername = Deno.env.get('MAIL_USERNAME');
+    const mailPassword = Deno.env.get('MAIL_PASSWORD');
+    const mailFromName = Deno.env.get('MAIL_FROM_NAME');
+    const mailFromAddress = Deno.env.get('MAIL_FROM_ADDRESS');
+
+    if (!mailHost || !mailPort || !mailUsername || !mailPassword || !mailFromName || !mailFromAddress) {
+      console.error('Missing SMTP configuration:', {
+        host: !!mailHost,
+        port: !!mailPort,
+        username: !!mailUsername,
+        password: !!mailPassword,
+        fromName: !!mailFromName,
+        fromAddress: !!mailFromAddress
+      });
+      return new Response(
+        JSON.stringify({ error: 'SMTP configuration is incomplete. Please configure all required SMTP settings in Supabase.' }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
     // Create HTML email content
     const htmlContent = `
       <!DOCTYPE html>
@@ -109,15 +135,15 @@ Deno.serve(async (req) => {
       </html>
     `;
 
-    // Send email using SMTP (from environment variables)
+    // Send email using SMTP (from Supabase environment variables only)
     const client = new SMTPClient({
       connection: {
-        hostname: Deno.env.get('MAIL_HOST') || "smtp.titan.email",
-        port: parseInt(Deno.env.get('MAIL_PORT') || "587"),
+        hostname: mailHost,
+        port: parseInt(mailPort),
         tls: Deno.env.get('MAIL_ENCRYPTION') === 'tls',
         auth: {
-          username: Deno.env.get('MAIL_USERNAME') || "support@academicdigital.space",
-          password: Deno.env.get('MAIL_PASSWORD') || "Metascholar@2025",
+          username: mailUsername,
+          password: mailPassword,
         },
       },
     });
@@ -125,11 +151,8 @@ Deno.serve(async (req) => {
     console.log('Sending email via SMTP to:', emailData.to);
 
     try {
-      const fromName = Deno.env.get('MAIL_FROM_NAME') || "Metascholar Institute";
-      const fromAddress = Deno.env.get('MAIL_FROM_ADDRESS') || "support@academicdigital.space";
-      
       await client.send({
-        from: `${fromName} <${fromAddress}>`,
+        from: `${mailFromName} <${mailFromAddress}>`,
         to: emailData.to,
         subject: emailData.subject,
         content: "auto",
