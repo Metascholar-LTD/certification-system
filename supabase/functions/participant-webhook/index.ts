@@ -5,15 +5,17 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-interface WebinarRegistrationData {
-  email: string;
-  first_name: string;
-  surname: string;
-  phone?: string;
-  company?: string;
-  job_title?: string;
-  time_zone: string;
+interface WebhookData {
+  registration_id: string;
   webinar_id: string;
+  webinar_title: string;
+  participant_name: string;
+  participant_email: string;
+  time_zone: string;
+  webinar_date: string;
+  webinar_link: string;
+  registration_type: 'free' | 'paid';
+  created_at: string;
 }
 
 Deno.serve(async (req) => {
@@ -39,13 +41,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    const body = await req.json() as WebinarRegistrationData;
-    console.log('Received webinar registration data:', body);
+    const body = await req.json() as WebhookData;
+    console.log('Received webhook data:', body);
 
     // Validate required fields
-    if (!body.email || !body.first_name || !body.surname || !body.time_zone || !body.webinar_id) {
+    if (!body.participant_email || !body.participant_name || !body.time_zone || !body.webinar_id || !body.registration_id) {
       return new Response(
-        JSON.stringify({ error: 'Email, first_name, surname, time_zone, and webinar_id are required' }),
+        JSON.stringify({ error: 'participant_email, participant_name, time_zone, webinar_id, and registration_id are required' }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -65,13 +67,17 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check if registration already exists
+    // Parse participant name into first_name and surname
+    const nameParts = body.participant_name.trim().split(' ');
+    const first_name = nameParts[0] || '';
+    const surname = nameParts.slice(1).join(' ') || '';
+
+    // Check if registration already exists by external_registration_id
     const { data: existingRegistration, error: checkError } = await supabase
       .from('webinar_registrations')
       .select('id, registration_status')
-      .eq('email', body.email)
-      .eq('webinar_id', body.webinar_id)
-      .single();
+      .eq('external_registration_id', body.registration_id)
+      .maybeSingle();
 
     if (checkError && checkError.code !== 'PGRST116') {
       console.error('Error checking existing participant:', checkError);
@@ -91,12 +97,11 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('webinar_registrations')
         .update({
-          first_name: body.first_name,
-          surname: body.surname,
-          phone: body.phone,
-          company: body.company,
-          job_title: body.job_title,
-          time_zone: body.time_zone
+          first_name,
+          surname,
+          email: body.participant_email,
+          time_zone: body.time_zone,
+          registration_type: body.registration_type
         })
         .eq('id', existingRegistration.id)
         .select()
@@ -120,15 +125,14 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('webinar_registrations')
         .insert({
-          email: body.email,
-          first_name: body.first_name,
-          surname: body.surname,
-          phone: body.phone,
-          company: body.company,
-          job_title: body.job_title,
+          email: body.participant_email,
+          first_name,
+          surname,
           time_zone: body.time_zone,
           webinar_id: body.webinar_id,
-          registration_status: 'registered'
+          registration_status: 'registered',
+          registration_type: body.registration_type,
+          external_registration_id: body.registration_id
         })
         .select()
         .single();

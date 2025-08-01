@@ -14,7 +14,188 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      certificate_templates: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          template_type: string
+          template_url: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          template_type?: string
+          template_url: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          template_type?: string
+          template_url?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      certificates: {
+        Row: {
+          certificate_url: string | null
+          created_at: string
+          id: string
+          issued_at: string | null
+          registration_id: string
+          sent_at: string | null
+          status: string
+          template_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          certificate_url?: string | null
+          created_at?: string
+          id?: string
+          issued_at?: string | null
+          registration_id: string
+          sent_at?: string | null
+          status?: string
+          template_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          certificate_url?: string | null
+          created_at?: string
+          id?: string
+          issued_at?: string | null
+          registration_id?: string
+          sent_at?: string | null
+          status?: string
+          template_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "certificates_registration_id_fkey"
+            columns: ["registration_id"]
+            isOneToOne: true
+            referencedRelation: "webinar_registrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "certificates_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "certificate_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      webinar_registrations: {
+        Row: {
+          attended_at: string | null
+          company: string | null
+          created_at: string
+          email: string
+          external_registration_id: string | null
+          first_name: string
+          id: string
+          job_title: string | null
+          phone: string | null
+          registration_status: string
+          registration_type: string | null
+          surname: string
+          time_zone: string
+          updated_at: string
+          webinar_id: string
+        }
+        Insert: {
+          attended_at?: string | null
+          company?: string | null
+          created_at?: string
+          email: string
+          external_registration_id?: string | null
+          first_name: string
+          id?: string
+          job_title?: string | null
+          phone?: string | null
+          registration_status?: string
+          registration_type?: string | null
+          surname: string
+          time_zone: string
+          updated_at?: string
+          webinar_id: string
+        }
+        Update: {
+          attended_at?: string | null
+          company?: string | null
+          created_at?: string
+          email?: string
+          external_registration_id?: string | null
+          first_name?: string
+          id?: string
+          job_title?: string | null
+          phone?: string | null
+          registration_status?: string
+          registration_type?: string | null
+          surname?: string
+          time_zone?: string
+          updated_at?: string
+          webinar_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webinar_registrations_webinar_id_fkey"
+            columns: ["webinar_id"]
+            isOneToOne: false
+            referencedRelation: "webinars"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      webinars: {
+        Row: {
+          created_at: string
+          description: string | null
+          duration_minutes: number | null
+          id: string
+          max_attendees: number | null
+          meeting_url: string | null
+          scheduled_at: string
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number | null
+          id?: string
+          max_attendees?: number | null
+          meeting_url?: string | null
+          scheduled_at: string
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number | null
+          id?: string
+          max_attendees?: number | null
+          meeting_url?: string | null
+          scheduled_at?: string
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
