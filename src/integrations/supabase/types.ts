@@ -196,6 +196,51 @@ export type Database = {
         }
         Relationships: []
       }
+      webhook_registrations: {
+        Row: {
+          created_at: string
+          id: string
+          participant_email: string
+          participant_name: string
+          registration_id: string
+          registration_type: string | null
+          time_zone: string
+          updated_at: string
+          webinar_date: string | null
+          webinar_id: string
+          webinar_link: string | null
+          webinar_title: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          participant_email: string
+          participant_name: string
+          registration_id: string
+          registration_type?: string | null
+          time_zone: string
+          updated_at?: string
+          webinar_date?: string | null
+          webinar_id: string
+          webinar_link?: string | null
+          webinar_title: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          participant_email?: string
+          participant_name?: string
+          registration_id?: string
+          registration_type?: string | null
+          time_zone?: string
+          updated_at?: string
+          webinar_date?: string | null
+          webinar_id?: string
+          webinar_link?: string | null
+          webinar_title?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

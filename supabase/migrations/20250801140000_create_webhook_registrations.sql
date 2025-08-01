@@ -22,6 +22,14 @@ CREATE INDEX idx_webhook_registrations_webinar_id ON public.webhook_registration
 -- Add RLS (Row Level Security) policy if needed
 ALTER TABLE public.webhook_registrations ENABLE ROW LEVEL SECURITY;
 
+-- Create policy to allow public read access (for admin interface)
+CREATE POLICY "Allow public read access" ON public.webhook_registrations
+FOR SELECT USING (true);
+
+-- Create policy to allow webhook function to insert/update
+CREATE POLICY "Allow webhook insert/update" ON public.webhook_registrations
+FOR ALL USING (true);
+
 -- Create updated_at trigger
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$

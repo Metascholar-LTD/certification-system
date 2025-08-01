@@ -50,16 +50,20 @@ export default function Certification() {
   const fetchWebhookRegistrations = async () => {
     try {
       setIsLoading(true);
+      console.log('Fetching webhook registrations...');
+      
       const { data, error } = await supabase
         .from('webhook_registrations')
         .select('*')
         .order('created_at', { ascending: false });
 
+      console.log('Supabase response:', { data, error });
+
       if (error) {
         console.error('Error fetching webhook registrations:', error);
         toast({
           title: "Error Loading Data",
-          description: "Failed to load participant registrations",
+          description: `Failed to load participant registrations: ${error.message}`,
           variant: "destructive",
         });
         return;
