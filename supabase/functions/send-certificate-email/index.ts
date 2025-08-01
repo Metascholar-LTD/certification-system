@@ -28,11 +28,11 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
-    const emailData: EmailRequest = await req.json();
-    console.log('Sending certificate email:', emailData);
+    const { to, subject, message, participant_name, certificate_number, certificate_url }: EmailRequest = await req.json();
+    console.log('Sending certificate email:', { to, subject, message, participant_name, certificate_number, certificate_url });
 
     // Validate required fields
-    if (!emailData.to || !emailData.participant_name || !emailData.certificate_url) {
+    if (!to || !participant_name || !certificate_url) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields: to, participant_name, certificate_url' }),
         { 
@@ -62,23 +62,23 @@ const handler = async (req: Request): Promise<Response> => {
         </head>
         <body>
           <div class="header">
-            <h1>🎓 Congratulations, ${emailData.participant_name}!</h1>
+            <h1>🎓 Congratulations, ${participant_name}!</h1>
             <p>Your certificate is ready</p>
           </div>
           
           <div class="content">
-            <p>Dear ${emailData.participant_name},</p>
+            <p>Dear ${participant_name},</p>
             
-            <p>${emailData.message}</p>
+            <p>${message}</p>
             
             <div class="certificate-preview">
               <h3>Your Certificate</h3>
-              <p><strong>Certificate Number:</strong> ${emailData.certificate_number}</p>
-              <img src="${emailData.certificate_url}" alt="Certificate for ${emailData.participant_name}" />
+              <p><strong>Certificate Number:</strong> ${certificate_number}</p>
+              <img src="${certificate_url}" alt="Certificate for ${participant_name}" />
             </div>
             
             <p style="text-align: center;">
-              <a href="${emailData.certificate_url}" class="button" download="Certificate_${emailData.participant_name.replace(/\s+/g, '_')}.png">
+              <a href="${certificate_url}" class="button" download="Certificate_${participant_name.replace(/\s+/g, '_')}.png">
                 📥 Download Certificate
               </a>
             </p>
@@ -134,12 +134,12 @@ const handler = async (req: Request): Promise<Response> => {
       await sendCommand(btoa(smtpConfig.username));
       await sendCommand(btoa(smtpConfig.password));
       await sendCommand(`MAIL FROM:<${smtpConfig.username}>`);
-      await sendCommand(`RCPT TO:<${emailData.to}>`);
+      await sendCommand(`RCPT TO:<${to}>`);
       await sendCommand('DATA');
       
       const emailData_smtp = `From: "Metascholar Institute" <${smtpConfig.username}>
-To: ${emailData.to}
-Subject: ${emailData.subject}
+To: ${to}
+Subject: ${subject}
 MIME-Version: 1.0
 Content-Type: text/html; charset=UTF-8
 
@@ -162,10 +162,10 @@ ${htmlContent}
         success: true, 
         message: 'Certificate email sent successfully',
         details: {
-          to: emailData.to,
-          subject: emailData.subject,
+          to: to,
+          subject: subject,
           from: 'support@academicdigital.space',
-          certificate_number: emailData.certificate_number
+          certificate_number: certificate_number
         }
       }),
       {
@@ -194,5 +194,4 @@ ${htmlContent}
     );
   }
 };
-
 serve(handler);
