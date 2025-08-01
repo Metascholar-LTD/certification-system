@@ -137,7 +137,7 @@ const handler = async (req: Request): Promise<Response> => {
       await sendCommand(`RCPT TO:<${to}>`);
       await sendCommand('DATA');
       
-      const emailData_smtp = `From: "Metascholar Institute" <${smtpConfig.username}>
+      const emailData = `From: "Metascholar Institute" <${smtpConfig.username}>
 To: ${to}
 Subject: ${subject}
 MIME-Version: 1.0
@@ -146,7 +146,7 @@ Content-Type: text/html; charset=UTF-8
 ${htmlContent}
 .`;
 
-      await sendCommand(emailData_smtp);
+      await sendCommand(emailData);
       await sendCommand('QUIT');
       
       conn.close();
@@ -194,4 +194,5 @@ ${htmlContent}
     );
   }
 };
+
 serve(handler);
