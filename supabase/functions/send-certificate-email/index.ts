@@ -1,5 +1,4 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -47,32 +46,6 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: 'Missing required fields: to, participant_name, certificate_url' }),
         { 
           status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      );
-    }
-
-    // Validate SMTP configuration
-    const mailHost = Deno.env.get('MAIL_HOST');
-    const mailPort = Deno.env.get('MAIL_PORT');
-    const mailUsername = Deno.env.get('MAIL_USERNAME');
-    const mailPassword = Deno.env.get('MAIL_PASSWORD');
-    const mailFromName = Deno.env.get('MAIL_FROM_NAME');
-    const mailFromAddress = Deno.env.get('MAIL_FROM_ADDRESS');
-
-    if (!mailHost || !mailPort || !mailUsername || !mailPassword || !mailFromName || !mailFromAddress) {
-      console.error('Missing SMTP configuration:', {
-        host: !!mailHost,
-        port: !!mailPort,
-        username: !!mailUsername,
-        password: !!mailPassword,
-        fromName: !!mailFromName,
-        fromAddress: !!mailFromAddress
-      });
-      return new Response(
-        JSON.stringify({ error: 'SMTP configuration is incomplete. Please configure all required SMTP settings in Supabase.' }),
-        { 
-          status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       );
@@ -135,37 +108,26 @@ Deno.serve(async (req) => {
       </html>
     `;
 
-    // Send email using SMTP (from Supabase environment variables only)
-    const client = new SMTPClient({
-      connection: {
-        hostname: mailHost,
-        port: parseInt(mailPort),
-        tls: Deno.env.get('MAIL_ENCRYPTION') === 'tls',
-        auth: {
-          username: mailUsername,
-          password: mailPassword,
-        },
-      },
-    });
-
-    console.log('Sending email via SMTP to:', emailData.to);
+    console.log('Sending email via Supabase to:', emailData.to);
 
     try {
-      await client.send({
-        from: `${mailFromName} <${mailFromAddress}>`,
+      // Send email using Supabase's built-in email service
+      const { data, error } = await supabase.auth.admin.sendRawEmail({
         to: emailData.to,
         subject: emailData.subject,
-        content: "auto",
         html: htmlContent,
       });
 
-      console.log('Email sent successfully via SMTP');
+      if (error) {
+        console.error('Supabase email sending error:', error);
+        throw new Error(`Failed to send email via Supabase: ${error.message}`);
+      }
+
+      console.log('Email sent successfully via Supabase');
       
-      await client.close();
-    } catch (smtpError) {
-      console.error('SMTP sending error:', smtpError);
-      await client.close();
-      throw new Error(`Failed to send email via SMTP: ${smtpError.message}`);
+    } catch (emailError) {
+      console.error('Email sending error:', emailError);
+      throw new Error(`Failed to send email: ${emailError.message}`);
     }
 
     return new Response(
