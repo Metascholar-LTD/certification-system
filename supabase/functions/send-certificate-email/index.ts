@@ -120,9 +120,32 @@ const handler = async (req: Request): Promise<Response> => {
       // Helper function to send command and read response
       const sendCommand = async (command: string) => {
         await conn.write(encoder.encode(command + '\r\n'));
+        
+        let response = '';
         const buffer = new Uint8Array(1024);
-        const n = await conn.read(buffer);
-        const response = decoder.decode(buffer.subarray(0, n || 0));
+        
+        while (true) {
+          const n = await conn.read(buffer);
+          if (n === null || n === 0) break;
+          
+          const chunk = decoder.decode(buffer.subarray(0, n));
+          response += chunk;
+          
+          // Check if we have a complete SMTP response
+          // SMTP responses end with \r\n and the last line should not have a trailing hyphen
+          const lines = response.split('\r\n');
+          if (lines.length > 0) {
+            const lastLine = lines[lines.length - 1];
+            // If the last line is empty (after \r\n split), check the second-to-last line
+            const statusLine = lastLine === '' ? lines[lines.length - 2] : lastLine;
+            
+            // Check if this is a complete response (no trailing hyphen and ends with \r\n)
+            if (statusLine && !statusLine.endsWith('-') && response.endsWith('\r\n')) {
+              break;
+            }
+          }
+        }
+        
         console.log(`SMTP Command: ${command}`);
         console.log(`SMTP Response: ${response}`);
         return response;
