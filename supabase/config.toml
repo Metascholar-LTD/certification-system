@@ -2,3 +2,6 @@ project_id = "leqhtrzyoxhfxqikljoe"
 
 [functions.participant-webhook]
 verify_jwt = false
+
+[functions.send-certificate-email]
+verify_jwt = false

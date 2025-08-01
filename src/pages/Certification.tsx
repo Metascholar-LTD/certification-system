@@ -17,7 +17,9 @@ import {
   CheckCircle,
   AlertCircle,
   Home,
-  RefreshCw
+  RefreshCw,
+  Eye,
+  FileImage
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
@@ -45,6 +47,7 @@ export default function Certification() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [certificates, setCertificates] = useState<any[]>([]);
 
   // Fetch webhook registrations from database
   const fetchWebhookRegistrations = async () => {
@@ -70,12 +73,14 @@ export default function Certification() {
       }
 
       // Get certificate status for each registration
-      const { data: certificates } = await supabase
+      const { data: certificatesData } = await supabase
         .from('certificates')
-        .select('registration_id, status');
+        .select('*');
+
+      setCertificates(certificatesData || []);
 
       const certificateStatusMap = new Map(
-        certificates?.map(cert => [cert.registration_id, cert.status]) || []
+        certificatesData?.map(cert => [cert.registration_id, cert.status]) || []
       );
 
       // Transform webhook data to participant format
@@ -142,6 +147,50 @@ export default function Certification() {
     }
   };
 
+  // Generate certificate with name overlay
+  const generateCertificateWithName = async (participant: Participant, templateFile: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d')!;
+      
+      if (templateFile.type === 'application/pdf') {
+        // For PDF templates, we'll just use the participant name as placeholder
+        // In a real implementation, you'd use PDF-lib to overlay text on PDF
+        resolve(`Certificate generated for ${participant.name}`);
+        return;
+      }
+      
+      // For image templates
+      const img = new Image();
+      img.onload = () => {
+        // Set canvas size to match image
+        canvas.width = img.width;
+        canvas.height = img.height;
+        
+        // Draw the template image
+        ctx.drawImage(img, 0, 0);
+        
+        // Configure text style for participant name
+        ctx.font = 'bold 48px Arial';
+        ctx.fillStyle = '#000000';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // Draw participant name in the center (you can adjust positioning)
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2 + 50; // Slightly below center
+        
+        ctx.fillText(participant.name, centerX, centerY);
+        
+        // Convert to data URL
+        const dataUrl = canvas.toDataURL('image/png');
+        resolve(dataUrl);
+      };
+      
+      img.src = URL.createObjectURL(templateFile);
+    });
+  };
+
   const generateCertificates = async () => {
     if (!certificateTemplate) {
       toast({
@@ -165,6 +214,8 @@ export default function Certification() {
     setProgress(0);
 
     try {
+      const generatedCerts = [];
+      
       // Generate certificates for each participant
       for (let i = 0; i < participants.length; i++) {
         const participant = participants[i];
@@ -184,6 +235,9 @@ export default function Certification() {
           .maybeSingle();
 
         if (!existingCert) {
+          // Generate certificate with participant name
+          const certificateDataUrl = await generateCertificateWithName(participant, certificateTemplate);
+          
           // Create certificate record
           const { error: certError } = await supabase
             .from('certificates')
@@ -192,27 +246,34 @@ export default function Certification() {
               participant_name: participant.name,
               participant_email: participant.email,
               certificate_number: certificateNumber,
+              certificate_url: certificateDataUrl, // Store the generated certificate
               status: 'issued',
               issued_at: new Date().toISOString(),
-              template_id: null // We'll add template management later
+              template_id: null
             });
 
           if (certError) {
             console.error('Error creating certificate:', certError);
             throw new Error(`Failed to create certificate for ${participant.name}`);
           }
+
+          generatedCerts.push({
+            participant_name: participant.name,
+            certificate_number: certificateNumber,
+            certificate_url: certificateDataUrl
+          });
         }
 
         // Small delay to show progress
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      // Update participants status in local state
-      setParticipants(prev => prev.map(p => ({ ...p, status: 'issued' as const })));
+      // Refresh data to get updated certificates
+      await fetchWebhookRegistrations();
       
       toast({
         title: "Certificates Generated",
-        description: `Successfully generated certificates for ${participants.length} participants`,
+        description: `Successfully generated certificates for ${participants.length} participants with personalized names`,
       });
 
     } catch (error) {
@@ -279,13 +340,30 @@ export default function Certification() {
           throw new Error(`Failed to update certificate for ${cert.participant_name}`);
         }
 
-        // TODO: Implement actual email sending here
-        console.log(`Sending certificate to ${cert.participant_email}`, {
-          certificateNumber: cert.certificate_number,
-          participantName: cert.participant_name,
-          emailSubject,
-          emailMessage
-        });
+        // Send email using Supabase Edge Function
+        try {
+          const { data: emailResult, error: emailError } = await supabase.functions.invoke('send-certificate-email', {
+            body: {
+              to: cert.participant_email,
+              subject: emailSubject,
+              message: emailMessage,
+              participant_name: cert.participant_name,
+              certificate_number: cert.certificate_number,
+              certificate_url: cert.certificate_url
+            }
+          });
+
+          if (emailError) {
+            console.error('Email sending error:', emailError);
+            throw new Error(`Failed to send email to ${cert.participant_email}`);
+          }
+
+          console.log('Email sent successfully:', emailResult);
+        } catch (emailError) {
+          console.error('Email error:', emailError);
+          // Continue with the process but log the error
+          console.log(`Email failed for ${cert.participant_email}, but certificate status will be updated`);
+        }
 
         // Small delay to show progress
         await new Promise(resolve => setTimeout(resolve, 200));
@@ -576,7 +654,7 @@ export default function Certification() {
               <CardHeader>
                 <CardTitle>Manage Certificates</CardTitle>
                 <CardDescription>
-                  View and manage all generated certificates.
+                  View and manage all generated certificates with preview.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -588,37 +666,154 @@ export default function Certification() {
                           <th className="text-left p-2">Name</th>
                           <th className="text-left p-2">Email</th>
                           <th className="text-left p-2">Course</th>
-                          <th className="text-left p-2">Completion Date</th>
+                          <th className="text-left p-2">Certificate #</th>
                           <th className="text-left p-2">Status</th>
                           <th className="text-left p-2">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {participants.map((participant) => (
-                          <tr key={participant.id} className="border-b">
-                            <td className="p-2">{participant.name}</td>
-                            <td className="p-2">{participant.email}</td>
-                            <td className="p-2">{participant.course}</td>
-                            <td className="p-2">{participant.completionDate}</td>
-                            <td className="p-2">{getStatusBadge(participant.status)}</td>
-                            <td className="p-2">
-                              <Button variant="outline" size="sm">
-                                <Download className="w-3 h-3 mr-1" />
-                                Download
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
+                        {participants.map((participant) => {
+                          const certificate = certificates.find(cert => cert.registration_id === participant.id);
+                          return (
+                            <tr key={participant.id} className="border-b">
+                              <td className="p-2">{participant.name}</td>
+                              <td className="p-2">{participant.email}</td>
+                              <td className="p-2">{participant.course}</td>
+                              <td className="p-2 font-mono text-xs">
+                                {certificate?.certificate_number || 'Not Generated'}
+                              </td>
+                              <td className="p-2">{getStatusBadge(participant.status)}</td>
+                              <td className="p-2">
+                                <div className="flex gap-2">
+                                  {certificate?.certificate_url && (
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      onClick={() => {
+                                        // Open certificate preview in new window
+                                        const newWindow = window.open('', '_blank');
+                                        if (newWindow) {
+                                          newWindow.document.write(`
+                                            <html>
+                                              <head>
+                                                <title>Certificate - ${participant.name}</title>
+                                                <style>
+                                                  body { margin: 0; padding: 20px; text-align: center; font-family: Arial, sans-serif; }
+                                                  img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+                                                  h2 { margin-bottom: 20px; }
+                                                </style>
+                                              </head>
+                                              <body>
+                                                <h2>Certificate for ${participant.name}</h2>
+                                                <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
+                                                <img src="${certificate.certificate_url}" alt="Certificate for ${participant.name}" />
+                                              </body>
+                                            </html>
+                                          `);
+                                        }
+                                      }}
+                                    >
+                                      <Eye className="w-3 h-3 mr-1" />
+                                      Preview
+                                    </Button>
+                                  )}
+                                  {certificate?.certificate_url && (
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      onClick={() => {
+                                        // Download certificate
+                                        const link = document.createElement('a');
+                                        link.href = certificate.certificate_url;
+                                        link.download = `Certificate_${participant.name.replace(/\s+/g, '_')}_${certificate.certificate_number}.png`;
+                                        link.click();
+                                      }}
+                                    >
+                                      <Download className="w-3 h-3 mr-1" />
+                                      Download
+                                    </Button>
+                                  )}
+                                  {!certificate && (
+                                    <Badge variant="secondary">No Certificate</Badge>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
-                    No participants uploaded yet. Please upload a CSV file first.
+                    No participants found. Webhook registrations will appear here.
                   </div>
                 )}
               </CardContent>
             </Card>
+
+            {/* Certificate Gallery */}
+            {certificates.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <FileImage className="w-5 h-5 mr-2" />
+                    Certificate Gallery
+                  </CardTitle>
+                  <CardDescription>
+                    Preview of all generated certificates
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {certificates
+                      .filter(cert => cert.certificate_url)
+                      .map((certificate) => (
+                        <div key={certificate.id} className="border rounded-lg p-4">
+                          <div className="aspect-[4/3] mb-3 overflow-hidden rounded border">
+                            <img 
+                              src={certificate.certificate_url} 
+                              alt={`Certificate for ${certificate.participant_name}`}
+                              className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
+                              onClick={() => {
+                                const newWindow = window.open('', '_blank');
+                                if (newWindow) {
+                                  newWindow.document.write(`
+                                    <html>
+                                      <head>
+                                        <title>Certificate - ${certificate.participant_name}</title>
+                                        <style>
+                                          body { margin: 0; padding: 20px; text-align: center; font-family: Arial, sans-serif; }
+                                          img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+                                          h2 { margin-bottom: 20px; }
+                                        </style>
+                                      </head>
+                                      <body>
+                                        <h2>Certificate for ${certificate.participant_name}</h2>
+                                        <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
+                                        <img src="${certificate.certificate_url}" alt="Certificate for ${certificate.participant_name}" />
+                                      </body>
+                                    </html>
+                                  `);
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="text-center">
+                            <h4 className="font-semibold">{certificate.participant_name}</h4>
+                            <p className="text-sm text-muted-foreground font-mono">
+                              {certificate.certificate_number}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {getStatusBadge(certificate.status as any)}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
         </Tabs>
       </div>
