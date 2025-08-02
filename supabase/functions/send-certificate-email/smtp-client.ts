@@ -69,10 +69,11 @@ export class SmtpClient {
         throw new Error(`AUTH password failed: ${passwordResponse}`);
       }
       
-      // MAIL FROM
-      const mailFromResponse = await this.sendCommand(`MAIL FROM:<${emailData.from}>`);
+      // MAIL FROM - extract email from "Name <email>" format
+      const fromEmail = this.extractEmailAddress(emailData.from);
+      const mailFromResponse = await this.sendCommand(`MAIL FROM:<${fromEmail}>`);
       if (!mailFromResponse.startsWith('250')) {
-        throw new Error(`MAIL FROM failed: ${mailFromResponse}`);
+        throw new Error(`MAIL FROM failed: ${mailFromResponse}. Check if email ${fromEmail} is verified on smtp.titan.email`);
       }
       
       // RCPT TO
@@ -175,5 +176,11 @@ export class SmtpClient {
       '',
       emailData.html
     ].join('\r\n');
+  }
+
+  private extractEmailAddress(fromField: string): string {
+    // Extract email from "Name <email>" format or return as-is if already just email
+    const match = fromField.match(/<(.+)>/);
+    return match ? match[1] : fromField;
   }
 }

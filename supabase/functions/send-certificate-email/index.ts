@@ -60,10 +60,21 @@ const handler = async (req: Request): Promise<Response> => {
       password: Deno.env.get('SMTP_PASSWORD') || '',
     };
 
-    // Validate SMTP password
+    // Validate SMTP configuration
     if (!smtpConfig.password) {
       throw new Error('SMTP_PASSWORD environment variable is not configured');
     }
+    
+    if (!smtpConfig.username || !smtpConfig.username.includes('@')) {
+      throw new Error('Invalid SMTP username. Must be a valid email address.');
+    }
+    
+    console.log('SMTP Config:', { 
+      hostname: smtpConfig.hostname, 
+      port: smtpConfig.port, 
+      username: smtpConfig.username,
+      passwordSet: !!smtpConfig.password 
+    });
 
     const smtpClient = new SmtpClient(smtpConfig);
     
@@ -71,7 +82,7 @@ const handler = async (req: Request): Promise<Response> => {
       await smtpClient.connect();
       
       await smtpClient.sendEmail({
-        from: `"Metascholar Institute" <${smtpConfig.username}>`,
+        from: smtpConfig.username, // Use just the email address for now
         to: to,
         subject: subject || `Your Certificate - ${participant_name}`,
         html: htmlContent
