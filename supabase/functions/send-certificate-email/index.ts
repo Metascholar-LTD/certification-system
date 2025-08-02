@@ -53,7 +53,7 @@ class TitanSMTPClient {
     }
   }
 
-  async sendEmail(emailData: { from: string; to: string; subject: string; html: string; attachmentData?: string; attachmentType?: string; fileExtension?: string; participantName?: string }): Promise<void> {
+  async sendEmail(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string }): Promise<void> {
     if (!this.conn) throw new Error('Not connected to SMTP server');
 
     try {
@@ -91,9 +91,7 @@ class TitanSMTPClient {
         to: emailData.to,
         subject: emailData.subject,
         html: emailData.html,
-        attachmentData: emailData.attachmentData,
-        attachmentType: emailData.attachmentType,
-        fileExtension: emailData.fileExtension,
+        pdfData: emailData.pdfData,
         participantName: emailData.participantName
       });
       console.log(`📦 Email content size: ${emailContent.length} characters`);
@@ -242,9 +240,9 @@ class TitanSMTPClient {
     return response.trim();
   }
 
-  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string; attachmentData?: string; attachmentType?: string; fileExtension?: string; participantName?: string }): string {
-    if (!emailData.attachmentData) {
-      // Original email without attachment
+  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string }): string {
+    if (!emailData.pdfData) {
+      // Email without PDF attachment
       return [
         `From: ${emailData.from}`,
         `To: ${emailData.to}`,
@@ -257,9 +255,16 @@ class TitanSMTPClient {
       ].join('\r\n');
     }
 
-    // Email with attachment
-    const boundary = 'boundary_' + Math.random().toString(36).substring(2, 15);
-    const fileName = `Certificate_${(emailData.participantName || 'Participant').replace(/[^a-zA-Z0-9]/g, '_')}.${emailData.fileExtension || 'png'}`;
+    // Email with PDF attachment
+    const boundary = 'pdf_boundary_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const fileName = `Certificate_${(emailData.participantName || 'Participant').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+    
+    // Format base64 data with proper line wrapping (76 chars per line as per RFC 2045)
+    const formattedPdfData = this.formatBase64Data(emailData.pdfData);
+    
+    console.log(`📄 [Debug] Building MIME email with boundary: ${boundary}`);
+    console.log(`📄 [Debug] PDF filename: ${fileName}`);
+    console.log(`📄 [Debug] Formatted PDF data length: ${formattedPdfData.length} chars`);
     
     return [
       `From: ${emailData.from}`,
@@ -275,14 +280,27 @@ class TitanSMTPClient {
       emailData.html,
       '',
       `--${boundary}`,
-      `Content-Type: ${emailData.attachmentType || 'image/png'}`,
+      'Content-Type: application/pdf',
       `Content-Disposition: attachment; filename="${fileName}"`,
       'Content-Transfer-Encoding: base64',
       '',
-      emailData.attachmentData,
+      formattedPdfData,
       '',
       `--${boundary}--`
     ].join('\r\n');
+  }
+
+  private formatBase64Data(base64Data: string): string {
+    // Remove any existing whitespace and ensure clean base64
+    const cleanData = base64Data.replace(/\s/g, '');
+    
+    // Split into lines of 76 characters (RFC 2045 standard)
+    const lines = [];
+    for (let i = 0; i < cleanData.length; i += 76) {
+      lines.push(cleanData.substring(i, i + 76));
+    }
+    
+    return lines.join('\r\n');
   }
 }
 
@@ -365,8 +383,8 @@ function generateEmailTemplate(data: {
         </div>
         
         <div style="text-align: center; background: #fff; padding: 20px; border-radius: 8px; border: 2px solid #667eea;">
-            <p><strong>📎 Your certificate is attached to this email.</strong></p>
-            <p>Look for the attachment in your email client to download and save your certificate.</p>
+            <p><strong>📎 Your certificate is attached to this email as a PDF file.</strong></p>
+            <p>Look for the PDF attachment in your email client to download and save your certificate.</p>
         </div>
         
         <p>Please save this certificate for your records. You can print it or share it digitally as proof of your achievement.</p>
@@ -429,23 +447,38 @@ async function sendEmailInBackground(emailData: {
       
       await smtpClient.connect();
       
-      // Extract base64 data from data URL (supports both PDF and PNG)
-      let attachmentData = '';
-      let attachmentType = 'application/pdf';
-      let fileExtension = 'pdf';
+      // Extract PDF base64 data from data URL
+      let pdfData = '';
+      
+      console.log(`🔍 [Debug] Certificate URL format: ${emailData.certificate_url.substring(0, 100)}...`);
+      console.log(`🔍 [Debug] Certificate URL length: ${emailData.certificate_url.length}`);
       
       if (emailData.certificate_url.startsWith('data:application/pdf;base64,')) {
-        attachmentData = emailData.certificate_url.split(',')[1];
-        attachmentType = 'application/pdf';
-        fileExtension = 'pdf';
-      } else if (emailData.certificate_url.startsWith('data:image/png;base64,')) {
-        attachmentData = emailData.certificate_url.split(',')[1];
-        attachmentType = 'image/png';
-        fileExtension = 'png';
-      } else if (emailData.certificate_url.startsWith('data:image/jpeg;base64,')) {
-        attachmentData = emailData.certificate_url.split(',')[1];
-        attachmentType = 'image/jpeg';
-        fileExtension = 'jpg';
+        pdfData = emailData.certificate_url.split(',')[1];
+        console.log(`✅ [Debug] Extracted PDF base64 data length: ${pdfData.length}`);
+        console.log(`🔍 [Debug] First 100 chars of base64: ${pdfData.substring(0, 100)}`);
+        
+        // Validate that we have actual PDF data
+        if (!pdfData || pdfData.length === 0) {
+          console.error(`❌ [Debug] Empty PDF data extracted`);
+          throw new Error('PDF data is empty');
+        }
+        
+        // Basic validation - PDF files should start with %PDF when decoded
+        try {
+          const firstBytes = atob(pdfData.substring(0, 8));
+          if (!firstBytes.startsWith('%PDF')) {
+            console.warn(`⚠️ [Debug] Warning: Data doesn't appear to be a valid PDF (first bytes: ${firstBytes})`);
+          } else {
+            console.log(`✅ [Debug] Valid PDF data detected`);
+          }
+        } catch (e) {
+          console.warn(`⚠️ [Debug] Could not validate PDF header: ${e}`);
+        }
+        
+      } else {
+        console.error(`❌ [Debug] Invalid certificate format. Expected PDF data URL, got: ${emailData.certificate_url.substring(0, 50)}`);
+        throw new Error('Only PDF certificates are supported');
       }
 
       await smtpClient.sendEmail({
@@ -453,9 +486,7 @@ async function sendEmailInBackground(emailData: {
         to: emailData.to,
         subject: emailData.subject || `Your Certificate - ${emailData.participant_name}`,
         html: htmlContent,
-        attachmentData: attachmentData,
-        attachmentType: attachmentType,
-        fileExtension: fileExtension,
+        pdfData: pdfData,
         participantName: emailData.participant_name,
       });
       
