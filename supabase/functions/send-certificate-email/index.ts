@@ -255,11 +255,17 @@ class TitanSMTPClient {
       ].join('\r\n');
     }
 
-    // Email with PDF attachment - keep it simple
-    const boundary = 'boundary123456789';
+    // Email with PDF attachment - improved MIME formatting
+    const boundary = '----=_NextPart_' + Math.random().toString(36).substring(2);
     
-    console.log(`📄 [Debug] Building MIME email with simple boundary`);
+    console.log(`📄 [Debug] Building MIME email with boundary: ${boundary}`);
     console.log(`📄 [Debug] Raw PDF data length: ${emailData.pdfData.length} chars`);
+    
+    // Generate proper filename with participant name
+    const safeName = emailData.participantName ? 
+      emailData.participantName.replace(/[^a-zA-Z0-9]/g, '_') : 
+      'participant';
+    const filename = `Certificate_${safeName}.pdf`;
     
     return [
       `From: ${emailData.from}`,
@@ -270,12 +276,13 @@ class TitanSMTPClient {
       '',
       `--${boundary}`,
       'Content-Type: text/html; charset=UTF-8',
+      'Content-Transfer-Encoding: 8bit',
       '',
       emailData.html,
       '',
       `--${boundary}`,
-      'Content-Type: application/pdf',
-      'Content-Disposition: attachment; filename="certificate.pdf"',
+      'Content-Type: application/pdf; name="' + filename + '"',
+      'Content-Disposition: attachment; filename="' + filename + '"',
       'Content-Transfer-Encoding: base64',
       '',
       emailData.pdfData,
@@ -446,6 +453,9 @@ async function sendEmailInBackground(emailData: {
           throw new Error('PDF data is empty');
         }
         
+        // Clean up base64 data - remove any whitespace or line breaks
+        pdfData = pdfData.replace(/\s/g, '');
+        
         // Basic validation - PDF files should start with %PDF when decoded
         try {
           const firstBytes = atob(pdfData.substring(0, 8));
@@ -458,11 +468,32 @@ async function sendEmailInBackground(emailData: {
           console.warn(`⚠️ [Debug] Could not validate PDF header: ${e}`);
         }
         
+        // Ensure base64 is properly formatted for email (no line breaks in the middle)
+        // Base64 should be continuous without line breaks for email attachments
+        console.log(`✅ [Debug] Cleaned PDF base64 data length: ${pdfData.length}`);
+        
+        // Final validation - ensure we have valid base64 data
+        if (pdfData.length < 100) {
+          console.error(`❌ [Debug] PDF data too short: ${pdfData.length} chars`);
+          throw new Error('PDF data appears to be corrupted or too small');
+        }
+        
+        // Validate base64 format
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(pdfData)) {
+          console.error(`❌ [Debug] Invalid base64 format detected`);
+          throw new Error('PDF data is not in valid base64 format');
+        }
+        
+        console.log(`✅ [Debug] PDF data validation passed`);
+        
       } else {
         console.error(`❌ [Debug] Invalid certificate format. Expected PDF data URL, got: ${emailData.certificate_url.substring(0, 50)}`);
         throw new Error('Only PDF certificates are supported');
       }
 
+      console.log(`📧 [Debug] Sending email with PDF data length: ${pdfData.length}`);
+      console.log(`📧 [Debug] Participant name: ${emailData.participant_name}`);
+      
       await smtpClient.sendEmail({
         from: 'support@academicdigital.space',
         to: emailData.to,

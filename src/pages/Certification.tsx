@@ -296,18 +296,23 @@ export default function Certification() {
   // Generate certificate with name overlay
   const generateCertificateWithName = async (participant: Participant, templateFile: File): Promise<string> => {
     return new Promise((resolve) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d')!;
-      
       if (templateFile.type === 'application/pdf') {
-        // For PDF templates, we'll just use the participant name as placeholder
-        // In a real implementation, you'd use PDF-lib to overlay text on PDF
-        resolve(`Certificate generated for ${participant.name}`);
+        // For PDF templates, convert the PDF to data URL directly
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          console.log(`📄 [Debug] PDF template converted to data URL, length: ${dataUrl.length}`);
+          resolve(dataUrl);
+        };
+        reader.readAsDataURL(templateFile);
         return;
       }
       
       // For image templates
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d')!;
       const img = new Image();
+      
       img.onload = () => {
         // Set canvas size to match image
         canvas.width = img.width;
@@ -384,6 +389,9 @@ export default function Certification() {
           // Generate certificate with participant name
           const certificateDataUrl = await generateCertificateWithName(participant, certificateTemplate);
           
+          // Determine certificate type
+          const isPDF = certificateTemplate.type === 'application/pdf';
+          
           // Create certificate record
           const { error: certError } = await supabase
             .from('certificates')
@@ -393,6 +401,7 @@ export default function Certification() {
               participant_email: participant.email,
               certificate_number: certificateNumber,
               certificate_url: certificateDataUrl, // Store the generated certificate
+              certificate_type: isPDF ? 'pdf' : 'image', // Set proper certificate type
               status: 'issued',
               issued_at: new Date().toISOString(),
               template_id: null
