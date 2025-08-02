@@ -23,114 +23,116 @@ class TitanSMTPClient {
     password: string;
   };
   private conn: Deno.TlsConn | null = null;
+  private encoder = new TextEncoder();
+  private decoder = new TextDecoder();
 
   constructor(config: { hostname: string; port: number; username: string; password: string }) {
     this.config = config;
   }
 
   async connect(): Promise<void> {
-    this.conn = await Deno.connectTls({
-      hostname: this.config.hostname,
-      port: this.config.port,
-    });
+    try {
+      this.conn = await Deno.connectTls({
+        hostname: this.config.hostname,
+        port: this.config.port,
+      });
 
-    // Read server greeting
-    const greeting = await this.readResponse();
-    console.log('Server greeting:', greeting);
-    
-    if (!greeting.startsWith('220')) {
-      throw new Error(`Connection failed: ${greeting}`);
+      const greeting = await this.readResponse();
+      console.log('SMTP Connected:', greeting.substring(0, 50));
+      
+      if (!greeting.startsWith('220')) {
+        throw new Error(`Connection failed: ${greeting}`);
+      }
+    } catch (error) {
+      console.error('SMTP connection error:', error);
+      throw error;
     }
   }
 
   async sendEmail(emailData: { from: string; to: string; subject: string; html: string }): Promise<void> {
-    if (!this.conn) throw new Error('Not connected');
+    if (!this.conn) throw new Error('Not connected to SMTP server');
 
-    // EHLO
-    await this.sendCommand('EHLO ' + this.config.hostname);
-    
-    // AUTH LOGIN
-    await this.sendCommand('AUTH LOGIN');
-    
-    // Username (base64)
-    await this.sendCommand(btoa(this.config.username));
-    
-    // Password (base64)
-    await this.sendCommand(btoa(this.config.password));
-    
-    // MAIL FROM
-    await this.sendCommand(`MAIL FROM:<${emailData.from}>`);
-    
-    // RCPT TO
-    await this.sendCommand(`RCPT TO:<${emailData.to}>`);
-    
-    // DATA
-    await this.sendCommand('DATA');
-    
-    // Email content
-    const emailContent = [
-      `From: ${emailData.from}`,
-      `To: ${emailData.to}`,
-      `Subject: ${emailData.subject}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=UTF-8',
-      '',
-      emailData.html,
-      '.'
-    ].join('\r\n');
-    
-    await this.conn.write(new TextEncoder().encode(emailContent + '\r\n'));
-    
-    const finalResponse = await this.readResponse();
-    console.log('Final response:', finalResponse);
-    
-    if (!finalResponse.startsWith('250')) {
-      throw new Error(`Email sending failed: ${finalResponse}`);
+    try {
+      console.log('Starting SMTP transaction...');
+      
+      // EHLO
+      await this.sendCommandAndValidate('EHLO ' + this.config.hostname, '250');
+      
+      // AUTH LOGIN
+      await this.sendCommandAndValidate('AUTH LOGIN', '334');
+      
+      // Username (base64)
+      await this.sendCommandAndValidate(btoa(this.config.username), '334');
+      
+      // Password (base64)
+      await this.sendCommandAndValidate(btoa(this.config.password), '235');
+      
+      // MAIL FROM
+      await this.sendCommandAndValidate(`MAIL FROM:<${emailData.from}>`, '250');
+      
+      // RCPT TO
+      await this.sendCommandAndValidate(`RCPT TO:<${emailData.to}>`, '250');
+      
+      // DATA
+      await this.sendCommandAndValidate('DATA', '354');
+      
+      // Send email content
+      const emailContent = [
+        `From: ${emailData.from}`,
+        `To: ${emailData.to}`,
+        `Subject: ${emailData.subject}`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/html; charset=UTF-8',
+        '',
+        emailData.html
+      ].join('\r\n');
+      
+      // Send content followed by termination sequence
+      await this.conn.write(this.encoder.encode(emailContent + '\r\n.\r\n'));
+      
+      // Read final response
+      const finalResponse = await this.readResponse();
+      console.log('Email sent, final response:', finalResponse);
+      
+      if (!finalResponse.startsWith('250')) {
+        throw new Error(`Email sending failed: ${finalResponse}`);
+      }
+      
+      console.log('Email sent successfully!');
+      
+    } catch (error) {
+      console.error('SMTP send error:', error);
+      throw error;
     }
   }
 
   async disconnect(): Promise<void> {
     if (this.conn) {
       try {
-        await this.sendCommand('QUIT');
+        await this.sendCommandAndValidate('QUIT', '221');
       } catch (e) {
         console.warn('Error during QUIT:', e);
+      } finally {
+        this.conn.close();
+        this.conn = null;
       }
-      this.conn.close();
-      this.conn = null;
     }
   }
 
-  private async sendCommand(command: string): Promise<void> {
+  private async sendCommandAndValidate(command: string, expectedCode: string): Promise<void> {
     if (!this.conn) throw new Error('Not connected');
     
-    console.log('>', command.startsWith('AUTH LOGIN') ? 'AUTH LOGIN' : command);
-    await this.conn.write(new TextEncoder().encode(command + '\r\n'));
+    const logCommand = command.includes(btoa(this.config.password)) ? '[PASSWORD]' : 
+                      command.includes(btoa(this.config.username)) ? '[USERNAME]' : command;
+    console.log('SMTP >', logCommand);
     
+    await this.conn.write(this.encoder.encode(command + '\r\n'));
     const response = await this.readResponse();
-    console.log('<', response);
     
-    // Check for error responses
-    if (command.startsWith('EHLO') && !response.startsWith('250')) {
-      throw new Error(`EHLO failed: ${response}`);
-    }
-    if (command.startsWith('AUTH LOGIN') && !response.startsWith('334')) {
-      throw new Error(`AUTH LOGIN failed: ${response}`);
-    }
-    if (command === btoa(this.config.username) && !response.startsWith('334')) {
-      throw new Error(`Username auth failed: ${response}`);
-    }
-    if (command === btoa(this.config.password) && !response.startsWith('235')) {
-      throw new Error(`Password auth failed: ${response}`);
-    }
-    if (command.startsWith('MAIL FROM') && !response.startsWith('250')) {
-      throw new Error(`MAIL FROM failed: ${response}`);
-    }
-    if (command.startsWith('RCPT TO') && !response.startsWith('250')) {
-      throw new Error(`RCPT TO failed: ${response}`);
-    }
-    if (command.startsWith('DATA') && !response.startsWith('354')) {
-      throw new Error(`DATA failed: ${response}`);
+    console.log('SMTP <', response.substring(0, 100));
+    
+    if (!response.startsWith(expectedCode)) {
+      throw new Error(`Command failed: ${command.split(' ')[0]} - Expected ${expectedCode}, got: ${response}`);
     }
   }
 
@@ -139,25 +141,28 @@ class TitanSMTPClient {
     
     const buffer = new Uint8Array(4096);
     let response = '';
+    let attempts = 0;
+    const maxAttempts = 10;
     
-    while (true) {
+    while (attempts < maxAttempts) {
       const n = await this.conn.read(buffer);
       if (n === null) break;
       
-      response += new TextDecoder().decode(buffer.subarray(0, n));
+      response += this.decoder.decode(buffer.subarray(0, n));
       
-      // Check if response is complete
-      if (response.includes('\r\n')) {
-        const lines = response.split('\r\n');
-        const lastLine = lines[lines.length - 2]; // -2 because last element is empty after split
-        if (lastLine && lastLine.length >= 4) {
-          const code = lastLine.substring(0, 3);
-          const separator = lastLine.charAt(3);
+      // Check if we have a complete SMTP response
+      const lines = response.split('\r\n');
+      if (lines.length > 1) {
+        const lastCompleteLine = lines[lines.length - 2];
+        if (lastCompleteLine && lastCompleteLine.length >= 4) {
+          const code = lastCompleteLine.substring(0, 3);
+          const separator = lastCompleteLine.charAt(3);
           if (/^\d{3}$/.test(code) && separator === ' ') {
             break;
           }
         }
       }
+      attempts++;
     }
     
     return response.trim();
@@ -222,6 +227,53 @@ function generateEmailTemplate(data: {
   `.trim();
 }
 
+// Background task for sending email
+async function sendEmailInBackground(emailData: {
+  to: string;
+  subject: string;
+  participant_name: string;
+  message?: string;
+  certificate_number?: string;
+  certificate_url: string;
+}): Promise<void> {
+  const smtpPassword = Deno.env.get('SMTP_PASSWORD');
+  if (!smtpPassword) {
+    console.error('SMTP_PASSWORD not configured');
+    return;
+  }
+
+  const smtpClient = new TitanSMTPClient({
+    hostname: 'smtp.titan.email',
+    port: 465,
+    username: 'support@academicdigital.space',
+    password: smtpPassword,
+  });
+
+  const htmlContent = generateEmailTemplate({
+    participant_name: emailData.participant_name,
+    message: emailData.message,
+    certificate_number: emailData.certificate_number,
+    certificate_url: emailData.certificate_url,
+  });
+
+  try {
+    console.log(`[Background] Sending email to ${emailData.to}...`);
+    
+    await smtpClient.connect();
+    await smtpClient.sendEmail({
+      from: 'support@academicdigital.space',
+      to: emailData.to,
+      subject: emailData.subject || `Your Certificate - ${emailData.participant_name}`,
+      html: htmlContent,
+    });
+    await smtpClient.disconnect();
+    
+    console.log(`[Background] Email sent successfully to ${emailData.to}`);
+  } catch (error) {
+    console.error(`[Background] Failed to send email to ${emailData.to}:`, error);
+  }
+}
+
 const handler = async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -234,7 +286,7 @@ const handler = async (req: Request): Promise<Response> => {
   try {
     const { to, subject, message, participant_name, certificate_number, certificate_url }: EmailRequest = await req.json();
     
-    console.log('Email request received:', { to, participant_name, certificate_number });
+    console.log('Certificate email request:', { to, participant_name, certificate_number });
 
     // Validate required fields
     if (!to || !participant_name || !certificate_url) {
@@ -245,55 +297,34 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     // Validate email address
-    if (!to.includes('@')) {
+    if (!to.includes('@') || !to.includes('.')) {
       return new Response(
-        JSON.stringify({ error: 'Invalid email address' }),
+        JSON.stringify({ error: 'Invalid email address format' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const smtpPassword = Deno.env.get('SMTP_PASSWORD');
-    if (!smtpPassword) {
-      throw new Error('SMTP_PASSWORD environment variable not configured');
-    }
-
-    // Create SMTP client
-    const smtpClient = new TitanSMTPClient({
-      hostname: 'smtp.titan.email',
-      port: 465,
-      username: 'support@academicdigital.space',
-      password: smtpPassword,
-    });
-
-    // Generate email content
-    const htmlContent = generateEmailTemplate({
+    // Start background email task
+    EdgeRuntime.waitUntil(sendEmailInBackground({
+      to,
+      subject,
       participant_name,
       message,
       certificate_number,
       certificate_url,
-    });
+    }));
 
-    console.log('Connecting to SMTP server...');
-    await smtpClient.connect();
-
-    console.log('Sending email...');
-    await smtpClient.sendEmail({
-      from: 'support@academicdigital.space',
-      to: to,
-      subject: subject || `Your Certificate - ${participant_name}`,
-      html: htmlContent,
-    });
-
-    console.log('Disconnecting...');
-    await smtpClient.disconnect();
-
-    console.log('Email sent successfully!');
-
+    // Return immediate response
     return new Response(
       JSON.stringify({
         success: true,
-        message: 'Certificate email sent successfully',
-        details: { to, from: 'support@academicdigital.space', certificate_number },
+        message: 'Certificate email queued for sending',
+        details: { 
+          to, 
+          participant_name, 
+          certificate_number,
+          status: 'queued'
+        },
       }),
       {
         status: 200,
@@ -302,10 +333,10 @@ const handler = async (req: Request): Promise<Response> => {
     );
 
   } catch (error: any) {
-    console.error('Email sending error:', error);
+    console.error('Request handling error:', error);
     return new Response(
       JSON.stringify({
-        error: 'Failed to send certificate email',
+        error: 'Failed to process certificate email request',
         details: error.message,
       }),
       {
