@@ -495,7 +495,7 @@ async function sendEmailInBackground(emailData: {
       console.log(`📧 [Debug] Participant name: ${emailData.participant_name}`);
       
       await smtpClient.sendEmail({
-        from: 'support@academicdigital.space',
+        from: 'Metascholar Institute - Workshop Certification <support@academicdigital.space>',
         to: emailData.to,
         subject: emailData.subject || `Your Certificate - ${emailData.participant_name}`,
         html: htmlContent,

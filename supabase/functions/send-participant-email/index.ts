@@ -443,7 +443,7 @@ async function sendParticipantEmailInBackground(emailData: {
       await smtpClient.connect();
       
       await smtpClient.sendEmail({
-        from: 'support@academicdigital.space',
+        from: 'Metascholar Institute - General Communication <support@academicdigital.space>',
         to: emailData.to,
         subject: emailData.subject,
         html: htmlContent,
