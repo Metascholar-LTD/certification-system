@@ -360,18 +360,6 @@ Available variables:
               />
             </div>
 
-            <div className="bg-blue-50 p-3 rounded-lg">
-              <div className="text-sm font-medium text-blue-800">Email Preview</div>
-              <div className="text-xs text-blue-600 mt-1">
-                {getFilteredParticipants().length > 0 && (
-                  <>
-                    <strong>To:</strong> {getFilteredParticipants()[0].email}<br/>
-                    <strong>Subject:</strong> {replaceTemplateVariables(emailSubjectBulk, getFilteredParticipants()[0])}
-                  </>
-                )}
-              </div>
-            </div>
-
             <Button 
               onClick={sendBulkEmails} 
               disabled={isSendingBulk || !emailSubjectBulk || !emailContentBulk}
