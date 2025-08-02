@@ -53,7 +53,7 @@ class TitanSMTPClient {
     }
   }
 
-  async sendEmail(emailData: { from: string; to: string; subject: string; html: string }): Promise<void> {
+  async sendEmail(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string }): Promise<void> {
     if (!this.conn) throw new Error('Not connected to SMTP server');
 
     try {
@@ -86,7 +86,14 @@ class TitanSMTPClient {
       await this.sendCommand('DATA', '', '354');
       
       // Build email content
-      const emailContent = this.buildEmailMessage(emailData);
+      const emailContent = this.buildEmailMessage({
+        from: emailData.from,
+        to: emailData.to,
+        subject: emailData.subject,
+        html: emailData.html,
+        pdfData: emailData.pdfData,
+        participantName: emailData.participantName
+      });
       console.log(`📦 Email content size: ${emailContent.length} characters`);
       
       // Send email content in chunks for large emails
@@ -233,16 +240,46 @@ class TitanSMTPClient {
     return response.trim();
   }
 
-  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string }): string {
+  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string }): string {
+    if (!emailData.pdfData) {
+      // Original email without attachment
+      return [
+        `From: ${emailData.from}`,
+        `To: ${emailData.to}`,
+        `Subject: ${emailData.subject}`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/html; charset=UTF-8',
+        'Content-Transfer-Encoding: 8bit',
+        '',
+        emailData.html
+      ].join('\r\n');
+    }
+
+    // Email with PDF attachment
+    const boundary = 'boundary_' + Math.random().toString(36).substring(2, 15);
+    const fileName = `Certificate_${(emailData.participantName || 'Participant').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+    
     return [
       `From: ${emailData.from}`,
       `To: ${emailData.to}`,
       `Subject: ${emailData.subject}`,
       'MIME-Version: 1.0',
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
       'Content-Type: text/html; charset=UTF-8',
       'Content-Transfer-Encoding: 8bit',
       '',
-      emailData.html
+      emailData.html,
+      '',
+      `--${boundary}`,
+      'Content-Type: application/pdf',
+      `Content-Disposition: attachment; filename="${fileName}"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      emailData.pdfData,
+      '',
+      `--${boundary}--`
     ].join('\r\n');
   }
 }
@@ -325,10 +362,9 @@ function generateEmailTemplate(data: {
             ${data.certificate_number ? `<p><strong>Certificate Number:</strong> ${data.certificate_number}</p>` : ''}
         </div>
         
-        <div style="text-align: center;">
-            <a href="${data.certificate_url}" class="button" target="_blank">
-                📜 Download Your Certificate
-            </a>
+        <div style="text-align: center; background: #fff; padding: 20px; border-radius: 8px; border: 2px solid #667eea;">
+            <p><strong>📎 Your certificate is attached to this email as a PDF file.</strong></p>
+            <p>Look for the attachment in your email client to download and save your certificate.</p>
         </div>
         
         <p>Please save this certificate for your records. You can print it or share it digitally as proof of your achievement.</p>
@@ -391,11 +427,19 @@ async function sendEmailInBackground(emailData: {
       
       await smtpClient.connect();
       
+      // Extract base64 PDF data from data URL
+      let pdfData = '';
+      if (emailData.certificate_url.startsWith('data:application/pdf;base64,')) {
+        pdfData = emailData.certificate_url.split(',')[1];
+      }
+
       await smtpClient.sendEmail({
         from: 'support@academicdigital.space',
         to: emailData.to,
         subject: emailData.subject || `Your Certificate - ${emailData.participant_name}`,
         html: htmlContent,
+        pdfData: pdfData,
+        participantName: emailData.participant_name,
       });
       
       await smtpClient.disconnect();
