@@ -29,12 +29,12 @@ export function HeroSection() {
         <div className="flex items-center justify-center mb-8">
           <Award className="h-16 w-16 text-primary mr-4" />
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold bg-clip-text text-transparent bg-gradient-to-b from-white to-gray-300">
-            Metascholar
+            Metascholar Institute
           </h1>
         </div>
         
         <h2 className="text-2xl md:text-3xl lg:text-4xl font-semibold text-white mb-4">
-          Institute
+          Certification System
         </h2>
         
         <p className="text-lg md:text-xl text-gray-300 mb-8 max-w-3xl mx-auto leading-relaxed">
