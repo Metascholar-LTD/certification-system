@@ -255,16 +255,11 @@ class TitanSMTPClient {
       ].join('\r\n');
     }
 
-    // Email with PDF attachment
-    const boundary = 'pdf_boundary_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-    const fileName = `Certificate_${(emailData.participantName || 'Participant').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+    // Email with PDF attachment - keep it simple
+    const boundary = 'boundary123456789';
     
-    // Format base64 data with proper line wrapping (76 chars per line as per RFC 2045)
-    const formattedPdfData = this.formatBase64Data(emailData.pdfData);
-    
-    console.log(`📄 [Debug] Building MIME email with boundary: ${boundary}`);
-    console.log(`📄 [Debug] PDF filename: ${fileName}`);
-    console.log(`📄 [Debug] Formatted PDF data length: ${formattedPdfData.length} chars`);
+    console.log(`📄 [Debug] Building MIME email with simple boundary`);
+    console.log(`📄 [Debug] Raw PDF data length: ${emailData.pdfData.length} chars`);
     
     return [
       `From: ${emailData.from}`,
@@ -275,33 +270,20 @@ class TitanSMTPClient {
       '',
       `--${boundary}`,
       'Content-Type: text/html; charset=UTF-8',
-      'Content-Transfer-Encoding: 8bit',
       '',
       emailData.html,
       '',
       `--${boundary}`,
       'Content-Type: application/pdf',
-      `Content-Disposition: attachment; filename="${fileName}"`,
+      'Content-Disposition: attachment; filename="certificate.pdf"',
       'Content-Transfer-Encoding: base64',
       '',
-      formattedPdfData,
+      emailData.pdfData,
       '',
       `--${boundary}--`
     ].join('\r\n');
   }
 
-  private formatBase64Data(base64Data: string): string {
-    // Remove any existing whitespace and ensure clean base64
-    const cleanData = base64Data.replace(/\s/g, '');
-    
-    // Split into lines of 76 characters (RFC 2045 standard)
-    const lines = [];
-    for (let i = 0; i < cleanData.length; i += 76) {
-      lines.push(cleanData.substring(i, i + 76));
-    }
-    
-    return lines.join('\r\n');
-  }
 }
 
 // Email template with PDF certificate link
