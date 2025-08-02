@@ -67,23 +67,9 @@ export default function EmailParticipants({ participants, isLoading }: EmailPart
     },
     {
       id: '2', 
-      name: 'Course Reminder',
-      subject: 'Reminder: Your upcoming course',
-      content: 'Hi {{name}},\n\nThis is a friendly reminder about your upcoming course: {{course}}.\n\nDate: {{date}}\nTime Zone: {{timezone}}\n\nWe look forward to seeing you!\n\nBest regards,\nMetascholar Team',
-      target_audience: 'all'
-    },
-    {
-      id: '3',
-      name: 'Premium Benefits',
-      subject: 'Unlock Your Premium Benefits',
-      content: 'Dear {{name}},\n\nThank you for being a premium member! You now have access to exclusive content and priority support.\n\nBest regards,\nMetascholar Team',
-      target_audience: 'paid'
-    },
-    {
-      id: '4',
-      name: 'Course Update',
-      subject: 'Important Course Update',
-      content: 'Hello {{name}},\n\nWe have an important update regarding your course: {{course}}.\n\nPlease check your dashboard for the latest information.\n\nIf you have any questions, feel free to reach out to our support team.\n\nBest regards,\nMetascholar Team',
+      name: 'Workshop Reminder',
+      subject: 'Reminder: Your upcoming workshop',
+      content: 'Hi {{name}},\n\nThis is a friendly reminder about your upcoming workshop: {{course}}.\n\nDate: {{date}}\nTime Zone: {{timezone}}\n\nWe look forward to seeing you!\n\nBest regards,\nMetascholar Team',
       target_audience: 'all'
     }
   ]);
@@ -149,7 +135,6 @@ export default function EmailParticipants({ participants, isLoading }: EmailPart
             let emailType = 'custom';
             if (selectedTemplate === '1') emailType = 'welcome';
             else if (selectedTemplate === '2') emailType = 'reminder';
-            else if (selectedTemplate === '4') emailType = 'update';
 
             const { error } = await supabase.functions.invoke('send-participant-email', {
               body: {
