@@ -23,6 +23,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import EmailParticipants from "@/components/EmailParticipants";
 
 interface Participant {
   id: string;
@@ -34,6 +35,7 @@ interface Participant {
   registration_id: string;
   webinar_date: string;
   time_zone: string;
+  registration_type?: string;
 }
 
 export default function Certification() {
@@ -98,6 +100,7 @@ export default function Certification() {
           completionDate: new Date(registration.webinar_date).toLocaleDateString(),
           webinar_date: registration.webinar_date,
           time_zone: registration.time_zone,
+          registration_type: registration.registration_type || 'free',
           status
         };
       });
@@ -273,9 +276,6 @@ export default function Certification() {
 
 
 
-
-
-
   const getStatusBadge = (status: Participant['status']) => {
     switch (status) {
       case 'pending':
@@ -321,10 +321,11 @@ export default function Certification() {
 
       <div className="container mx-auto px-4 py-8">
         <Tabs defaultValue="participants" className="space-y-6">
-                   <TabsList className="grid w-full grid-cols-2">
-           <TabsTrigger value="participants">Certificate Management</TabsTrigger>
-           <TabsTrigger value="email-settings">Email Settings</TabsTrigger>
-         </TabsList>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="participants">Certificate Management</TabsTrigger>
+            <TabsTrigger value="email-participants">Email Participants</TabsTrigger>
+            <TabsTrigger value="email-settings">Email Settings</TabsTrigger>
+          </TabsList>
 
           <TabsContent value="participants" className="space-y-6">
             {/* Stats Card */}
@@ -687,6 +688,10 @@ export default function Certification() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="email-participants" className="space-y-6">
+            <EmailParticipants participants={participants} isLoading={isLoading} />
           </TabsContent>
 
           <TabsContent value="email-settings" className="space-y-6">

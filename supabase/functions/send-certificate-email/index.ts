@@ -552,10 +552,10 @@ const handler = async (req: Request): Promise<Response> => {
     });
 
     // Validate required fields
-    if (!to || !participant_name || !certificate_url) {
+    if (!to || !participant_name) {
       console.error('❌ Missing required fields');
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: to, participant_name, certificate_url' }),
+        JSON.stringify({ error: 'Missing required fields: to, participant_name' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -569,8 +569,8 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    // Validate certificate URL
-    if (!certificate_url.startsWith('data:')) {
+    // Validate certificate URL (only if provided)
+    if (certificate_url && !certificate_url.startsWith('data:')) {
       console.error('❌ Invalid certificate URL format - expected data URL');
       return new Response(
         JSON.stringify({ error: 'Invalid certificate URL format' }),
