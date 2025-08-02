@@ -83,14 +83,11 @@ export function generateCertificateEmailTemplate(data: CertificateEmailData): st
           <div class="certificate-preview">
             <h3>Your Certificate</h3>
             <p><strong>Certificate Number:</strong> ${certificate_number}</p>
-            <img src="${certificate_url}" alt="Certificate for ${participant_name}" />
+            <p style="text-align: center; padding: 20px; background: #f1f5f9; border-radius: 8px; margin: 20px 0;">
+              <strong>📄 Your certificate is attached to this email as a PDF file</strong><br>
+              <span style="color: #64748b; font-size: 14px;">Please check your email attachments to download your certificate</span>
+            </p>
           </div>
-          
-          <p style="text-align: center;">
-            <a href="${certificate_url}" class="button" download="Certificate_${participant_name.replace(/\s+/g, '_')}.png">
-              📥 Download Certificate
-            </a>
-          </p>
           
           <p>This certificate serves as proof of your successful completion of the course. You can download and print it for your records.</p>
           

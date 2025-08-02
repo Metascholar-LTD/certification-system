@@ -14,7 +14,16 @@ interface EmailRequest {
   certificate_url: string;
 }
 
-// Optimized SMTP client for smtp.titan.email
+interface EmailOptions {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+  certificate_url?: string;
+  participant_name?: string;
+}
+
+// Optimized SMTP client for smtp.titan.email with PDF attachment support
 class TitanSMTPClient {
   private config: {
     hostname: string;
@@ -53,110 +62,136 @@ class TitanSMTPClient {
     }
   }
 
-  async sendEmail(emailData: { from: string; to: string; subject: string; html: string }): Promise<void> {
-    if (!this.conn) throw new Error('Not connected to SMTP server');
-
-    try {
-      console.log('📧 Starting SMTP email transaction...');
-      console.log(`📬 From: ${emailData.from} → To: ${emailData.to}`);
-      
-      // EHLO command
-      console.log('🤝 Sending EHLO...');
-      await this.sendCommand('EHLO', this.config.hostname, '250');
-      
-      // AUTH LOGIN
-      console.log('🔐 Starting authentication...');
-      await this.sendCommand('AUTH', 'LOGIN', '334');
-      
-      // Username (base64)
-      await this.sendCommand(btoa(this.config.username), '', '334');
-      
-      // Password (base64)
-      await this.sendCommand(btoa(this.config.password), '', '235');
-      console.log('✅ Authentication successful');
-      
-      // MAIL FROM
-      await this.sendCommand('MAIL', `FROM:<${emailData.from}>`, '250');
-      
-      // RCPT TO
-      await this.sendCommand('RCPT', `TO:<${emailData.to}>`, '250');
-      
-      // DATA command
-      console.log('📄 Preparing to send email content...');
-      await this.sendCommand('DATA', '', '354');
-      
-      // Build email content
-      const emailContent = this.buildEmailMessage(emailData);
-      console.log(`📦 Email content size: ${emailContent.length} characters`);
-      
-      // Send email content in chunks for large emails
-      await this.sendEmailContent(emailContent);
-      
-      // Send termination sequence
-      console.log('🏁 Sending email termination...');
-      await this.conn.write(this.encoder.encode('\r\n.\r\n'));
-      
-      // Read final response
-      const finalResponse = await this.readResponse();
-      console.log('📨 Final SMTP response:', finalResponse);
-      
-      if (!finalResponse.startsWith('250')) {
-        throw new Error(`Email delivery failed: ${finalResponse}`);
-      }
-      
-      console.log('🎉 Email sent successfully!');
-      
-    } catch (error) {
-      console.error('💥 SMTP transaction failed:', error);
-      throw error;
-    }
-  }
-
-  private async sendEmailContent(content: string): Promise<void> {
-    const chunkSize = 64 * 1024; // 64KB chunks
-    const totalSize = content.length;
+  async sendEmail(options: EmailOptions): Promise<void> {
+    if (!this.conn) throw new Error('Not connected');
     
-    if (totalSize > chunkSize) {
-      console.log(`📚 Sending large email in chunks (${Math.ceil(totalSize / chunkSize)} chunks)`);
+    console.log(`📧 Starting SMTP email transaction...`);
+    console.log(`📬 From: ${options.from} → To: ${options.to}`);
+    
+    // EHLO command
+    await this.sendCommand('EHLO', 'smtp.titan.email', '250');
+    
+    console.log('🔐 Starting authentication...');
+    await this.sendCommand('AUTH', 'LOGIN', '334');
+    
+    // Send username (base64 encoded)
+    const username = btoa(this.config.username);
+    await this.sendCommand('', username, '334', '[USERNAME]');
+    
+    // Send password (base64 encoded)
+    const password = btoa(this.config.password);
+    await this.sendCommand('', password, '235', '[PASSWORD]');
+    
+    console.log('✅ Authentication successful');
+    
+    // MAIL FROM
+    await this.sendCommand('MAIL FROM', `<${options.from}>`, '250');
+    
+    // RCPT TO
+    await this.sendCommand('RCPT TO', `<${options.to}>`, '250');
+    
+    // DATA command
+    console.log('📄 Preparing to send email content...');
+    await this.sendCommand('DATA', '', '354');
+    
+    // Create email content with attachment if certificate_url is provided
+    let emailContent: string;
+    
+    if (options.certificate_url && options.certificate_url.startsWith('data:')) {
+      // Extract attachment data
+      let base64Data: string;
+      let mimeType: string;
+      let fileExtension: string;
+      let filename: string;
       
-      for (let i = 0; i < totalSize; i += chunkSize) {
-        const chunk = content.slice(i, i + chunkSize);
-        await this.conn!.write(this.encoder.encode(chunk));
-        
-        // Small delay between chunks
-        if (i + chunkSize < totalSize) {
-          await new Promise(resolve => setTimeout(resolve, 10));
+      if (options.certificate_url.startsWith('data:application/pdf;base64,')) {
+        base64Data = options.certificate_url.replace('data:application/pdf;base64,', '');
+        mimeType = 'application/pdf';
+        fileExtension = 'pdf';
+      } else if (options.certificate_url.startsWith('data:image/')) {
+        const matches = options.certificate_url.match(/^data:image\/([^;]+);base64,(.+)$/);
+        if (matches) {
+          mimeType = `image/${matches[1]}`;
+          base64Data = matches[2];
+          fileExtension = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+        } else {
+          throw new Error('Invalid image data URL format');
         }
+      } else {
+        throw new Error('Unsupported certificate format');
       }
+      
+      filename = `Certificate_${(options.participant_name || 'User').replace(/\s+/g, '_')}.${fileExtension}`;
+      const boundary = `----formdata-lovable-${Date.now()}`;
+      
+      emailContent = `To: ${options.to}
+From: ${options.from}
+Subject: ${options.subject}
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="${boundary}"
+
+--${boundary}
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+${options.html}
+
+--${boundary}
+Content-Type: ${mimeType}
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="${filename}"
+
+${base64Data}
+--${boundary}--`;
     } else {
-      await this.conn!.write(this.encoder.encode(content));
+      // Simple HTML email without attachment
+      emailContent = `To: ${options.to}
+From: ${options.from}
+Subject: ${options.subject}
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+${options.html}`;
     }
+    
+    console.log(`📦 Email content size: ${emailContent.length} characters`);
+    
+    // Send content in chunks for large emails
+    const chunkSize = 64000; // 64KB chunks
+    const chunks = Math.ceil(emailContent.length / chunkSize);
+    
+    if (chunks > 1) {
+      console.log(`📚 Sending large email in chunks (${chunks} chunks)`);
+    }
+    
+    for (let i = 0; i < chunks; i++) {
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, emailContent.length);
+      const chunk = emailContent.slice(start, end);
+      
+      await this.conn.write(this.encoder.encode(chunk));
+    }
+    
+    // End data with CRLF.CRLF
+    console.log('🏁 Sending email termination...');
+    await this.conn.write(this.encoder.encode('\r\n.\r\n'));
+    
+    // Read final response
+    const finalResponse = await this.readResponse();
+    console.log(`📨 Final SMTP response: ${finalResponse.substring(0, 100)}`);
+    
+    if (!finalResponse.startsWith('250')) {
+      throw new Error(`Email sending failed: ${finalResponse}`);
+    }
+    
+    console.log('🎉 Email sent successfully!');
   }
 
-  async disconnect(): Promise<void> {
-    if (this.conn) {
-      try {
-        console.log('👋 Disconnecting from SMTP server...');
-        await this.sendCommand('QUIT', '', '221');
-      } catch (e) {
-        console.warn('⚠️ QUIT command failed:', e);
-      } finally {
-        this.conn.close();
-        this.conn = null;
-        console.log('🔌 SMTP connection closed');
-      }
-    }
-  }
-
-  private async sendCommand(command: string, parameter: string, expectedCode: string): Promise<void> {
+  private async sendCommand(command: string, parameter: string, expectedCode: string, logOverride?: string): Promise<void> {
     if (!this.conn) throw new Error('Not connected');
     
     const fullCommand = parameter ? `${command} ${parameter}` : command;
-    const isPassword = fullCommand.includes(btoa(this.config.password));
-    const isUsername = fullCommand.includes(btoa(this.config.username));
-    
-    const logCommand = isPassword ? '[PASSWORD]' : 
-                      isUsername ? '[USERNAME]' : fullCommand;
+    const logCommand = logOverride || fullCommand;
     
     console.log('📤 SMTP >', logCommand);
     
@@ -233,21 +268,23 @@ class TitanSMTPClient {
     return response.trim();
   }
 
-  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string }): string {
-    return [
-      `From: ${emailData.from}`,
-      `To: ${emailData.to}`,
-      `Subject: ${emailData.subject}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=UTF-8',
-      'Content-Transfer-Encoding: 8bit',
-      '',
-      emailData.html
-    ].join('\r\n');
+  async disconnect(): Promise<void> {
+    if (this.conn) {
+      try {
+        console.log('👋 Disconnecting from SMTP server...');
+        await this.sendCommand('QUIT', '', '221');
+      } catch (e) {
+        console.warn('⚠️ QUIT command failed:', e);
+      } finally {
+        this.conn.close();
+        this.conn = null;
+        console.log('🔌 SMTP connection closed');
+      }
+    }
   }
 }
 
-// Email template with PDF certificate link
+// Email template that mentions the PDF attachment
 function generateEmailTemplate(data: {
   participant_name: string;
   message?: string;
@@ -283,15 +320,14 @@ function generateEmailTemplate(data: {
             border-radius: 0 0 10px 10px; 
             border: 1px solid #e0e0e0;
         }
-        .button { 
-            background: #667eea; 
-            color: white !important; 
-            padding: 15px 30px; 
-            text-decoration: none; 
-            border-radius: 5px; 
-            display: inline-block; 
-            margin: 20px 0; 
-            font-weight: bold;
+        .attachment-notice { 
+            background: #e8f4fd; 
+            color: #1976d2; 
+            padding: 20px; 
+            border-radius: 8px; 
+            border-left: 4px solid #1976d2;
+            margin: 20px 0;
+            text-align: center;
         }
         .footer { 
             text-align: center; 
@@ -321,14 +357,14 @@ function generateEmailTemplate(data: {
         <p>${data.message || 'Congratulations on successfully completing the course! Your dedication and hard work have paid off.'}</p>
         
         <div class="certificate-info">
-            <p><strong>🏆 Your certificate is now ready for download!</strong></p>
+            <p><strong>🏆 Your certificate is ready!</strong></p>
             ${data.certificate_number ? `<p><strong>Certificate Number:</strong> ${data.certificate_number}</p>` : ''}
         </div>
         
-        <div style="text-align: center;">
-            <a href="${data.certificate_url}" class="button" target="_blank">
-                📜 Download Your Certificate
-            </a>
+        <div class="attachment-notice">
+            <h3>📎 Certificate Attached</h3>
+            <p><strong>Your certificate is attached to this email as a PDF file.</strong></p>
+            <p>Please check your email attachments to download and save your certificate.</p>
         </div>
         
         <p>Please save this certificate for your records. You can print it or share it digitally as proof of your achievement.</p>
@@ -396,6 +432,8 @@ async function sendEmailInBackground(emailData: {
         to: emailData.to,
         subject: emailData.subject || `Your Certificate - ${emailData.participant_name}`,
         html: htmlContent,
+        certificate_url: emailData.certificate_url,
+        participant_name: emailData.participant_name,
       });
       
       await smtpClient.disconnect();
