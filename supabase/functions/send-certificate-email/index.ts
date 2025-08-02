@@ -139,30 +139,56 @@ class TitanSMTPClient {
   private async readResponse(): Promise<string> {
     if (!this.conn) throw new Error('Not connected');
     
-    const buffer = new Uint8Array(4096);
+    const buffer = new Uint8Array(8192); // Increased buffer size
     let response = '';
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 30; // Increased timeout for large emails
     
     while (attempts < maxAttempts) {
-      const n = await this.conn.read(buffer);
-      if (n === null) break;
-      
-      response += this.decoder.decode(buffer.subarray(0, n));
-      
-      // Check if we have a complete SMTP response
-      const lines = response.split('\r\n');
-      if (lines.length > 1) {
-        const lastCompleteLine = lines[lines.length - 2];
-        if (lastCompleteLine && lastCompleteLine.length >= 4) {
-          const code = lastCompleteLine.substring(0, 3);
-          const separator = lastCompleteLine.charAt(3);
-          if (/^\d{3}$/.test(code) && separator === ' ') {
-            break;
+      try {
+        const n = await this.conn.read(buffer);
+        if (n === null) {
+          console.log('Connection closed by server');
+          break;
+        }
+        
+        const chunk = this.decoder.decode(buffer.subarray(0, n));
+        response += chunk;
+        
+        // Check if we have a complete SMTP response
+        const lines = response.split('\r\n');
+        if (lines.length > 1) {
+          // Look for the last complete line
+          for (let i = lines.length - 2; i >= 0; i--) {
+            const line = lines[i];
+            if (line && line.length >= 4) {
+              const code = line.substring(0, 3);
+              const separator = line.charAt(3);
+              if (/^\d{3}$/.test(code) && separator === ' ') {
+                console.log(`Complete SMTP response received: ${code}`);
+                return response.trim();
+              }
+            }
           }
         }
+        
+        attempts++;
+        
+        // Small delay between attempts
+        if (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      } catch (error) {
+        console.error(`Read attempt ${attempts} failed:`, error);
+        attempts++;
+        if (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       }
-      attempts++;
+    }
+    
+    if (attempts >= maxAttempts) {
+      console.warn(`Max attempts reached. Response so far: ${response.substring(0, 100)}`);
     }
     
     return response.trim();
