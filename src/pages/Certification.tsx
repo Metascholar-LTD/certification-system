@@ -322,9 +322,9 @@ export default function Certification() {
       <div className="container mx-auto px-4 py-8">
         <Tabs defaultValue="participants" className="space-y-6">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="participants">Certificate Management</TabsTrigger>
-            <TabsTrigger value="email-participants">Email Participants</TabsTrigger>
-            <TabsTrigger value="email-settings">Email Settings</TabsTrigger>
+            <TabsTrigger value="participants">📋 Certificate Management</TabsTrigger>
+            <TabsTrigger value="email-participants">📧 General Communication</TabsTrigger>
+            <TabsTrigger value="email-settings">⚙️ Configure Email</TabsTrigger>
           </TabsList>
 
           <TabsContent value="participants" className="space-y-6">
