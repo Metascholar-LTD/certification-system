@@ -145,68 +145,19 @@ export default function EmailParticipants({ participants, isLoading }: EmailPart
             const personalizedContent = replaceTemplateVariables(emailContentBulk, participant);
             const personalizedSubject = replaceTemplateVariables(emailSubjectBulk, participant);
             
-            // Create a simple HTML email (without PDF attachment)
-            const htmlContent = `
-              <!DOCTYPE html>
-              <html>
-                <head>
-                  <meta charset="UTF-8">
-                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                  <title>${personalizedSubject}</title>
-                  <style>
-                    body { 
-                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-                      line-height: 1.6; 
-                      color: #333; 
-                      max-width: 600px; 
-                      margin: 0 auto; 
-                      padding: 20px; 
-                    }
-                    .header { 
-                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                      color: white; 
-                      padding: 30px; 
-                      text-align: center; 
-                      border-radius: 10px 10px 0 0; 
-                    }
-                    .content { 
-                      background: #f9f9f9; 
-                      padding: 30px; 
-                      border-radius: 0 0 10px 10px; 
-                      border: 1px solid #e0e0e0;
-                      white-space: pre-wrap;
-                    }
-                    .footer { 
-                      text-align: center; 
-                      color: #666; 
-                      font-size: 12px; 
-                      margin-top: 30px; 
-                      border-top: 1px solid #e0e0e0;
-                      padding-top: 20px;
-                    }
-                  </style>
-                </head>
-                <body>
-                  <div class="header">
-                    <h1>📧 Message from Metascholar Institute</h1>
-                  </div>
-                  <div class="content">${personalizedContent}</div>
-                  <div class="footer">
-                    <p>This is an automated message from Metascholar Institute.</p>
-                    <p>© 2025 Metascholar Institute. All rights reserved.</p>
-                  </div>
-                </body>
-              </html>
-            `;
+            // Determine email type based on template selection
+            let emailType = 'custom';
+            if (selectedTemplate === '1') emailType = 'welcome';
+            else if (selectedTemplate === '2') emailType = 'reminder';
+            else if (selectedTemplate === '4') emailType = 'update';
 
-            const { error } = await supabase.functions.invoke('send-certificate-email', {
+            const { error } = await supabase.functions.invoke('send-participant-email', {
               body: {
                 to: participant.email,
                 subject: personalizedSubject,
-                message: htmlContent,
+                content: personalizedContent,
                 participant_name: participant.name,
-                certificate_number: '',
-                certificate_url: ''
+                email_type: emailType
               }
             });
 
