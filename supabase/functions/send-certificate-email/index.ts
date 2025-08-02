@@ -53,7 +53,7 @@ class TitanSMTPClient {
     }
   }
 
-  async sendEmail(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string }): Promise<void> {
+  async sendEmail(emailData: { from: string; to: string; subject: string; html: string; attachmentData?: string; attachmentType?: string; fileExtension?: string; participantName?: string }): Promise<void> {
     if (!this.conn) throw new Error('Not connected to SMTP server');
 
     try {
@@ -91,7 +91,9 @@ class TitanSMTPClient {
         to: emailData.to,
         subject: emailData.subject,
         html: emailData.html,
-        pdfData: emailData.pdfData,
+        attachmentData: emailData.attachmentData,
+        attachmentType: emailData.attachmentType,
+        fileExtension: emailData.fileExtension,
         participantName: emailData.participantName
       });
       console.log(`📦 Email content size: ${emailContent.length} characters`);
@@ -240,8 +242,8 @@ class TitanSMTPClient {
     return response.trim();
   }
 
-  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string }): string {
-    if (!emailData.pdfData) {
+  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string; attachmentData?: string; attachmentType?: string; fileExtension?: string; participantName?: string }): string {
+    if (!emailData.attachmentData) {
       // Original email without attachment
       return [
         `From: ${emailData.from}`,
@@ -255,9 +257,9 @@ class TitanSMTPClient {
       ].join('\r\n');
     }
 
-    // Email with PDF attachment
+    // Email with attachment
     const boundary = 'boundary_' + Math.random().toString(36).substring(2, 15);
-    const fileName = `Certificate_${(emailData.participantName || 'Participant').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+    const fileName = `Certificate_${(emailData.participantName || 'Participant').replace(/[^a-zA-Z0-9]/g, '_')}.${emailData.fileExtension || 'png'}`;
     
     return [
       `From: ${emailData.from}`,
@@ -273,11 +275,11 @@ class TitanSMTPClient {
       emailData.html,
       '',
       `--${boundary}`,
-      'Content-Type: application/pdf',
+      `Content-Type: ${emailData.attachmentType || 'image/png'}`,
       `Content-Disposition: attachment; filename="${fileName}"`,
       'Content-Transfer-Encoding: base64',
       '',
-      emailData.pdfData,
+      emailData.attachmentData,
       '',
       `--${boundary}--`
     ].join('\r\n');
@@ -363,7 +365,7 @@ function generateEmailTemplate(data: {
         </div>
         
         <div style="text-align: center; background: #fff; padding: 20px; border-radius: 8px; border: 2px solid #667eea;">
-            <p><strong>📎 Your certificate is attached to this email as a PDF file.</strong></p>
+            <p><strong>📎 Your certificate is attached to this email.</strong></p>
             <p>Look for the attachment in your email client to download and save your certificate.</p>
         </div>
         
@@ -427,10 +429,23 @@ async function sendEmailInBackground(emailData: {
       
       await smtpClient.connect();
       
-      // Extract base64 PDF data from data URL
-      let pdfData = '';
+      // Extract base64 data from data URL (supports both PDF and PNG)
+      let attachmentData = '';
+      let attachmentType = 'application/pdf';
+      let fileExtension = 'pdf';
+      
       if (emailData.certificate_url.startsWith('data:application/pdf;base64,')) {
-        pdfData = emailData.certificate_url.split(',')[1];
+        attachmentData = emailData.certificate_url.split(',')[1];
+        attachmentType = 'application/pdf';
+        fileExtension = 'pdf';
+      } else if (emailData.certificate_url.startsWith('data:image/png;base64,')) {
+        attachmentData = emailData.certificate_url.split(',')[1];
+        attachmentType = 'image/png';
+        fileExtension = 'png';
+      } else if (emailData.certificate_url.startsWith('data:image/jpeg;base64,')) {
+        attachmentData = emailData.certificate_url.split(',')[1];
+        attachmentType = 'image/jpeg';
+        fileExtension = 'jpg';
       }
 
       await smtpClient.sendEmail({
@@ -438,7 +453,9 @@ async function sendEmailInBackground(emailData: {
         to: emailData.to,
         subject: emailData.subject || `Your Certificate - ${emailData.participant_name}`,
         html: htmlContent,
-        pdfData: pdfData,
+        attachmentData: attachmentData,
+        attachmentType: attachmentType,
+        fileExtension: fileExtension,
         participantName: emailData.participant_name,
       });
       
