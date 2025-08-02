@@ -39,7 +39,7 @@ export function HeroSection() {
         
         <p className="text-lg md:text-xl text-gray-300 mb-8 max-w-3xl mx-auto leading-relaxed">
           Professional Certification Management System. Seamlessly issue, manage, and track 
-          certificates for Metascholar Workshop participants and webinarcompletions.
+          certificates for Metascholar Workshop participants and webinar completions.
         </p>
 
         {/* Feature Highlights */}
