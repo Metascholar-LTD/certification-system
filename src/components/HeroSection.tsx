@@ -46,18 +46,18 @@ export function HeroSection() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12 max-w-4xl mx-auto">
           <div className="flex flex-col items-center p-4 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20">
             <FileCheck className="h-8 w-8 text-primary mb-2" />
-            <h3 className="text-white font-semibold mb-1">CSV Upload</h3>
-            <p className="text-gray-300 text-sm text-center">Upload participant data effortlessly</p>
+            <h3 className="text-white font-semibold mb-1">Webhook Integration</h3>
+            <p className="text-gray-300 text-sm text-center">Automatic participant registration via webhooks</p>
           </div>
           <div className="flex flex-col items-center p-4 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20">
             <FileImage className="h-8 w-8 text-primary mb-2" />
-            <h3 className="text-white font-semibold mb-1">Certificate Generation</h3>
-            <p className="text-gray-300 text-sm text-center">Create beautiful, professional certificates</p>
+            <h3 className="text-white font-semibold mb-1">Certificate Management</h3>
+            <p className="text-gray-300 text-sm text-center">Upload and send PDF certificates individually</p>
           </div>
           <div className="flex flex-col items-center p-4 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20">
             <Users className="h-8 w-8 text-primary mb-2" />
-            <h3 className="text-white font-semibold mb-1">Bulk Management</h3>
-            <p className="text-gray-300 text-sm text-center">Manage hundreds of certificates at once</p>
+            <h3 className="text-white font-semibold mb-1">Bulk Communication</h3>
+            <p className="text-gray-300 text-sm text-center">Send personalized emails with smart filtering</p>
           </div>
         </div>
 
