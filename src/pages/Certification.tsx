@@ -41,11 +41,8 @@ export default function Certification() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [participants, setParticipants] = useState<Participant[]>([]);
-  const [certificateTemplate, setCertificateTemplate] = useState<File | null>(null);
   const [emailSubject, setEmailSubject] = useState("Your Certificate from Metascholar Institute");
   const [emailMessage, setEmailMessage] = useState("Congratulations on completing the course! Please find your certificate attached.");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [certificates, setCertificates] = useState<any[]>([]);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
@@ -147,24 +144,20 @@ export default function Certification() {
       // Generate unique certificate number
       const certificateNumber = `CERT-${Date.now()}-${participant.name.replace(/\s+/g, '')}`;
 
-      // Determine file type
-      const fileType = file.type;
-      const isPDF = fileType === 'application/pdf';
+             // Check if certificate already exists
+       const { data: existingCert } = await supabase
+         .from('certificates')
+         .select('id')
+         .eq('registration_id', participant.id)
+         .maybeSingle();
 
-      // Check if certificate already exists
-      const { data: existingCert } = await supabase
-        .from('certificates')
-        .select('id')
-        .eq('registration_id', participant.id)
-        .maybeSingle();
-
-      const certificateData = {
-        certificate_url: dataUrl,
-        certificate_number: certificateNumber,
-        certificate_type: isPDF ? 'pdf' : 'image', // Add certificate type
-        status: 'issued',
-        issued_at: new Date().toISOString(),
-      };
+       const certificateData = {
+         certificate_url: dataUrl,
+         certificate_number: certificateNumber,
+         certificate_type: 'pdf', // Only PDF type supported
+         status: 'issued',
+         issued_at: new Date().toISOString(),
+       };
 
       if (existingCert) {
         // Update existing certificate
@@ -188,10 +181,10 @@ export default function Certification() {
         if (insertError) throw insertError;
       }
 
-      toast({
-        title: "Certificate Uploaded",
-        description: `${isPDF ? 'PDF' : 'Image'} certificate for ${participant.name} has been uploaded successfully`,
-      });
+             toast({
+         title: "Certificate Uploaded",
+         description: `PDF certificate for ${participant.name} has been uploaded successfully`,
+       });
       
       // Refresh data
       await fetchWebhookRegistrations();
@@ -276,274 +269,13 @@ export default function Certification() {
     }
   };
 
-  const handleCertificateUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file && (file.type === 'application/pdf' || file.type.startsWith('image/'))) {
-      setCertificateTemplate(file);
-      toast({
-        title: "Certificate Template Uploaded",
-        description: "Template ready for use",
-      });
-    } else {
-      toast({
-        title: "Invalid File Type",
-        description: "Please upload a PDF or image file",
-        variant: "destructive",
-      });
-    }
-  };
 
-  // Generate certificate with name overlay
-  const generateCertificateWithName = async (participant: Participant, templateFile: File): Promise<string> => {
-    return new Promise((resolve) => {
-      if (templateFile.type === 'application/pdf') {
-        // For PDF templates, convert the PDF to data URL directly
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          console.log(`📄 [Debug] PDF template converted to data URL, length: ${dataUrl.length}`);
-          resolve(dataUrl);
-        };
-        reader.readAsDataURL(templateFile);
-        return;
-      }
-      
-      // For image templates
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d')!;
-      const img = new Image();
-      
-      img.onload = () => {
-        // Set canvas size to match image
-        canvas.width = img.width;
-        canvas.height = img.height;
-        
-        // Draw the template image
-        ctx.drawImage(img, 0, 0);
-        
-        // Configure text style for participant name
-        ctx.font = 'bold 48px Arial';
-        ctx.fillStyle = '#000000';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        // Draw participant name in the center (you can adjust positioning)
-        const centerX = canvas.width / 2;
-        const centerY = canvas.height / 2 + 50; // Slightly below center
-        
-        ctx.fillText(participant.name, centerX, centerY);
-        
-        // Convert to data URL
-        const dataUrl = canvas.toDataURL('image/png');
-        resolve(dataUrl);
-      };
-      
-      img.src = URL.createObjectURL(templateFile);
-    });
-  };
 
-  const generateCertificates = async () => {
-    if (!certificateTemplate) {
-      toast({
-        title: "Missing Template",
-        description: "Please upload a certificate template",
-        variant: "destructive",
-      });
-      return;
-    }
 
-    if (participants.length === 0) {
-      toast({
-        title: "No Participants",
-        description: "No registered participants found to generate certificates for",
-        variant: "destructive",
-      });
-      return;
-    }
 
-    setIsProcessing(true);
-    setProgress(0);
 
-    try {
-      const generatedCerts = [];
-      
-      // Generate certificates for each participant
-      for (let i = 0; i < participants.length; i++) {
-        const participant = participants[i];
-        
-        // Update progress
-        const progressPercent = Math.round(((i + 1) / participants.length) * 100);
-        setProgress(progressPercent);
 
-        // Generate unique certificate number
-        const certificateNumber = `CERT-${Date.now()}-${i.toString().padStart(3, '0')}`;
 
-        // Check if certificate already exists
-        const { data: existingCert } = await supabase
-          .from('certificates')
-          .select('id')
-          .eq('registration_id', participant.id)
-          .maybeSingle();
-
-        if (!existingCert) {
-          // Generate certificate with participant name
-          const certificateDataUrl = await generateCertificateWithName(participant, certificateTemplate);
-          
-          // Determine certificate type
-          const isPDF = certificateTemplate.type === 'application/pdf';
-          
-          // Create certificate record
-          const { error: certError } = await supabase
-            .from('certificates')
-            .insert({
-              registration_id: participant.id,
-              participant_name: participant.name,
-              participant_email: participant.email,
-              certificate_number: certificateNumber,
-              certificate_url: certificateDataUrl, // Store the generated certificate
-              certificate_type: isPDF ? 'pdf' : 'image', // Set proper certificate type
-              status: 'issued',
-              issued_at: new Date().toISOString(),
-              template_id: null
-            });
-
-          if (certError) {
-            console.error('Error creating certificate:', certError);
-            throw new Error(`Failed to create certificate for ${participant.name}`);
-          }
-
-          generatedCerts.push({
-            participant_name: participant.name,
-            certificate_number: certificateNumber,
-            certificate_url: certificateDataUrl
-          });
-        }
-
-        // Small delay to show progress
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-
-      // Refresh data to get updated certificates
-      await fetchWebhookRegistrations();
-      
-      toast({
-        title: "Certificates Generated",
-        description: `Successfully generated certificates for ${participants.length} participants with personalized names`,
-      });
-
-    } catch (error) {
-      console.error('Certificate generation error:', error);
-      toast({
-        title: "Generation Failed",
-        description: error instanceof Error ? error.message : "Failed to generate certificates",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-      setProgress(0);
-    }
-  };
-
-  const sendCertificates = async () => {
-    // Get certificates that are issued but not sent
-    const { data: certificates, error: fetchError } = await supabase
-      .from('certificates')
-      .select('*, webhook_registrations!certificates_webhook_registration_fkey(participant_email, participant_name)')
-      .eq('status', 'issued');
-
-    if (fetchError) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch certificates",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!certificates || certificates.length === 0) {
-      toast({
-        title: "No Certificates to Send",
-        description: "Please generate certificates first",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsProcessing(true);
-    setProgress(0);
-
-    try {
-      // Send certificates via email (simulated for now)
-      for (let i = 0; i < certificates.length; i++) {
-        const cert = certificates[i];
-        
-        // Update progress
-        const progressPercent = Math.round(((i + 1) / certificates.length) * 100);
-        setProgress(progressPercent);
-
-        // Update certificate status to sent
-        const { error: updateError } = await supabase
-          .from('certificates')
-          .update({ 
-            status: 'sent', 
-            sent_at: new Date().toISOString() 
-          })
-          .eq('id', cert.id);
-
-        if (updateError) {
-          console.error('Error updating certificate:', updateError);
-          throw new Error(`Failed to update certificate for ${cert.participant_name}`);
-        }
-
-        // Send email using Supabase Edge Function
-        try {
-          const { data: emailResult, error: emailError } = await supabase.functions.invoke('send-certificate-email', {
-            body: {
-              to: cert.participant_email,
-              subject: emailSubject,
-              message: emailMessage,
-              participant_name: cert.participant_name,
-              certificate_number: cert.certificate_number,
-              certificate_url: cert.certificate_url
-            }
-          });
-
-          if (emailError) {
-            console.error('Email sending error:', emailError);
-            throw new Error(`Failed to send email to ${cert.participant_email}`);
-          }
-
-          console.log('Email sent successfully:', emailResult);
-        } catch (emailError) {
-          console.error('Email error:', emailError);
-          // Continue with the process but log the error
-          console.log(`Email failed for ${cert.participant_email}, but certificate status will be updated`);
-        }
-
-        // Small delay to show progress
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-
-      // Update participants status in local state
-      setParticipants(prev => prev.map(p => ({ ...p, status: 'sent' as const })));
-      
-      toast({
-        title: "Certificates Sent",
-        description: `Successfully sent certificates to ${certificates.length} participants`,
-      });
-
-    } catch (error) {
-      console.error('Certificate sending error:', error);
-      toast({
-        title: "Sending Failed",
-        description: error instanceof Error ? error.message : "Failed to send certificates",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-      setProgress(0);
-    }
-  };
 
   const getStatusBadge = (status: Participant['status']) => {
     switch (status) {
@@ -678,18 +410,24 @@ export default function Certification() {
                             
                             {/* Certificate Upload */}
                             <div>
-                              <input
-                                type="file"
-                                accept=".pdf,.jpg,.jpeg,.png"
-                                style={{ display: 'none' }}
-                                id={`upload-${participant.id}`}
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) {
-                                    uploadCertificateForParticipant(participant, file);
-                                  }
-                                }}
-                              />
+                                                             <input
+                                 type="file"
+                                 accept=".pdf"
+                                 style={{ display: 'none' }}
+                                 id={`upload-${participant.id}`}
+                                 onChange={(e) => {
+                                   const file = e.target.files?.[0];
+                                   if (file && file.type === 'application/pdf') {
+                                     uploadCertificateForParticipant(participant, file);
+                                   } else if (file) {
+                                     toast({
+                                       title: "Invalid File Type",
+                                       description: "Please upload a PDF file only",
+                                       variant: "destructive",
+                                     });
+                                   }
+                                 }}
+                               />
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -711,11 +449,10 @@ export default function Certification() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => {
-                                    const isPDF = certificate.certificate_url.startsWith('data:application/pdf');
-                                    const fileExtension = isPDF ? 'pdf' : 'png';
-                                    
-                                    const newWindow = window.open('', '_blank', 'width=900,height=700,scrollbars=yes,resizable=yes');
+                                                                     onClick={() => {
+                                     const fileExtension = 'pdf';
+                                     
+                                     const newWindow = window.open('', '_blank', 'width=900,height=700,scrollbars=yes,resizable=yes');
                                     if (newWindow) {
                                       newWindow.document.write(`
                                         <!DOCTYPE html>
@@ -814,127 +551,97 @@ export default function Certification() {
                                             </style>
                                           </head>
                                           <body>
-                                            <div class="container">
-                                              <h1>🎓 Certificate Preview <span class="file-type">${isPDF ? 'PDF' : 'IMAGE'}</span></h1>
-                                              
-                                              <div class="info">
-                                                <p><strong>Participant:</strong> ${participant.name}</p>
-                                                <p><strong>Email:</strong> ${participant.email}</p>
-                                                <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
-                                                <p><strong>Course:</strong> ${participant.course}</p>
-                                                <p><strong>Type:</strong> ${isPDF ? 'PDF Document' : 'Image File'}</p>
-                                              </div>
-                                              
-                                              <div class="certificate-container">
-                                                <div id="loading" class="loading">
-                                                  Loading certificate...
-                                                </div>
-                                                
-                                                ${isPDF ? `
-                                                  <iframe 
-                                                    id="pdfViewer" 
-                                                    class="pdf-viewer" 
-                                                    style="display: none;"
-                                                    onload="
-                                                      document.getElementById('loading').style.display = 'none';
-                                                      this.style.display = 'block';
-                                                    "
-                                                    onerror="
-                                                      document.getElementById('loading').style.display = 'none';
-                                                      document.getElementById('error').style.display = 'block';
-                                                    "
-                                                  ></iframe>
-                                                ` : `
-                                                  <img 
-                                                    id="certificateImg" 
-                                                    class="certificate-img" 
-                                                    style="display: none;"
-                                                    alt="Certificate for ${participant.name}"
-                                                    onload="
-                                                      document.getElementById('loading').style.display = 'none';
-                                                      this.style.display = 'block';
-                                                    "
-                                                    onerror="
-                                                      document.getElementById('loading').style.display = 'none';
-                                                      document.getElementById('error').style.display = 'block';
-                                                    "
-                                                  />
-                                                `}
-                                                
-                                                <div id="error" class="error" style="display: none;">
-                                                  ❌ Failed to load certificate.<br>
-                                                  ${isPDF ? 'PDF file may be corrupted or browser does not support PDF viewing.' : 'Image file may be corrupted or in an unsupported format.'}
-                                                  <br><br>
-                                                  <button class="btn" onclick="downloadCertificate()">
-                                                    📥 Download Certificate Instead
-                                                  </button>
-                                                </div>
-                                              </div>
-                                              
-                                              <div class="actions">
-                                                <button class="btn" onclick="downloadCertificate()">
-                                                  📥 Download Certificate
-                                                </button>
-                                                ${isPDF ? `
-                                                  <button class="btn btn-secondary" onclick="openInNewTab()">
-                                                    🔗 Open PDF in New Tab
-                                                  </button>
-                                                ` : ''}
-                                                <button class="btn btn-secondary" onclick="window.close()">
-                                                  ✕ Close Preview
-                                                </button>
-                                              </div>
-                                            </div>
-                                            
-                                            <script>
-                                              const certificateData = ${JSON.stringify(certificate.certificate_url)};
-                                              const isPDF = ${isPDF};
-                                              
-                                              document.addEventListener('DOMContentLoaded', function() {
-                                                if (certificateData) {
-                                                  if (isPDF) {
-                                                    // For PDF files, use iframe
-                                                    const pdfViewer = document.getElementById('pdfViewer');
-                                                    if (pdfViewer) {
-                                                      pdfViewer.src = certificateData;
-                                                    }
-                                                  } else {
-                                                    // For images, use img tag
-                                                    const img = document.getElementById('certificateImg');
-                                                    if (img) {
-                                                      img.src = certificateData;
-                                                    }
-                                                  }
-                                                } else {
-                                                  document.getElementById('loading').style.display = 'none';
-                                                  document.getElementById('error').style.display = 'block';
-                                                  document.getElementById('error').innerHTML = '❌ No certificate data found.';
-                                                }
-                                              });
-                                              
-                                              function downloadCertificate() {
-                                                const link = document.createElement('a');
-                                                link.href = certificateData;
-                                                link.download = 'Certificate_${participant.name.replace(/[^a-zA-Z0-9]/g, '_')}_${certificate.certificate_number}.${fileExtension}';
-                                                document.body.appendChild(link);
-                                                link.click();
-                                                document.body.removeChild(link);
-                                              }
-                                              
-                                              function openInNewTab() {
-                                                if (isPDF) {
-                                                  const newTab = window.open('', '_blank');
-                                                  if (newTab) {
-                                                    newTab.location.href = certificateData;
-                                                  }
-                                                }
-                                              }
-                                              
-                                              // Debug logging
-                                              console.log('Certificate Type:', isPDF ? 'PDF' : 'Image');
-                                              console.log('Certificate Data Length:', certificateData ? certificateData.length : 0);
-                                              console.log('Data URL Preview:', certificateData ? certificateData.substring(0, 100) + '...' : 'No data');
-                                            </script>
+                                                                                         <div class="container">
+                                               <h1>🎓 Certificate Preview <span class="file-type">PDF</span></h1>
+                                               
+                                               <div class="info">
+                                                 <p><strong>Participant:</strong> ${participant.name}</p>
+                                                 <p><strong>Email:</strong> ${participant.email}</p>
+                                                 <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
+                                                 <p><strong>Course:</strong> ${participant.course}</p>
+                                                 <p><strong>Type:</strong> PDF Document</p>
+                                               </div>
+                                               
+                                               <div class="certificate-container">
+                                                 <div id="loading" class="loading">
+                                                   Loading certificate...
+                                                 </div>
+                                                 
+                                                 <iframe 
+                                                   id="pdfViewer" 
+                                                   class="pdf-viewer" 
+                                                   style="display: none;"
+                                                   onload="
+                                                     document.getElementById('loading').style.display = 'none';
+                                                     this.style.display = 'block';
+                                                   "
+                                                   onerror="
+                                                     document.getElementById('loading').style.display = 'none';
+                                                     document.getElementById('error').style.display = 'block';
+                                                   "
+                                                 ></iframe>
+                                                 
+                                                 <div id="error" class="error" style="display: none;">
+                                                   ❌ Failed to load certificate.<br>
+                                                   PDF file may be corrupted or browser does not support PDF viewing.
+                                                   <br><br>
+                                                   <button class="btn" onclick="downloadCertificate()">
+                                                     📥 Download Certificate Instead
+                                                   </button>
+                                                 </div>
+                                               </div>
+                                               
+                                               <div class="actions">
+                                                 <button class="btn" onclick="downloadCertificate()">
+                                                   📥 Download Certificate
+                                                 </button>
+                                                 <button class="btn btn-secondary" onclick="openInNewTab()">
+                                                   🔗 Open PDF in New Tab
+                                                 </button>
+                                                 <button class="btn btn-secondary" onclick="window.close()">
+                                                   ✕ Close Preview
+                                                 </button>
+                                               </div>
+                                             </div>
+                                             
+                                             <script>
+                                               const certificateData = ${JSON.stringify(certificate.certificate_url)};
+                                               
+                                               document.addEventListener('DOMContentLoaded', function() {
+                                                 if (certificateData) {
+                                                   // For PDF files, use iframe
+                                                   const pdfViewer = document.getElementById('pdfViewer');
+                                                   if (pdfViewer) {
+                                                     pdfViewer.src = certificateData;
+                                                   }
+                                                 } else {
+                                                   document.getElementById('loading').style.display = 'none';
+                                                   document.getElementById('error').style.display = 'block';
+                                                   document.getElementById('error').innerHTML = '❌ No certificate data found.';
+                                                 }
+                                               });
+                                               
+                                               function downloadCertificate() {
+                                                 const link = document.createElement('a');
+                                                 link.href = certificateData;
+                                                 link.download = 'Certificate_${participant.name.replace(/[^a-zA-Z0-9]/g, '_')}_${certificate.certificate_number}.pdf';
+                                                 document.body.appendChild(link);
+                                                 link.click();
+                                                 document.body.removeChild(link);
+                                               }
+                                               
+                                               function openInNewTab() {
+                                                 const newTab = window.open('', '_blank');
+                                                 if (newTab) {
+                                                   newTab.location.href = certificateData;
+                                                 }
+                                               }
+                                               
+                                               // Debug logging
+                                               console.log('Certificate Type: PDF');
+                                               console.log('Certificate Data Length:', certificateData ? certificateData.length : 0);
+                                               console.log('Data URL Preview:', certificateData ? certificateData.substring(0, 100) + '...' : 'No data');
+                                             </script>
                                           </body>
                                         </html>
                                       `);
@@ -1073,29 +780,29 @@ export default function Certification() {
                                     <Button 
                                       variant="outline" 
                                       size="sm"
-                                      onClick={() => {
-                                        // Open certificate preview in new window
-                                        const newWindow = window.open('', '_blank');
-                                        if (newWindow) {
-                                          newWindow.document.write(`
-                                            <html>
-                                              <head>
-                                                <title>Certificate - ${participant.name}</title>
-                                                <style>
-                                                  body { margin: 0; padding: 20px; text-align: center; font-family: Arial, sans-serif; }
-                                                  img { max-width: 100%; height: auto; border: 1px solid #ddd; }
-                                                  h2 { margin-bottom: 20px; }
-                                                </style>
-                                              </head>
-                                              <body>
-                                                <h2>Certificate for ${participant.name}</h2>
-                                                <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
-                                                <img src="${certificate.certificate_url}" alt="Certificate for ${participant.name}" />
-                                              </body>
-                                            </html>
-                                          `);
-                                        }
-                                      }}
+                                                                             onClick={() => {
+                                         // Open certificate preview in new window
+                                         const newWindow = window.open('', '_blank');
+                                         if (newWindow) {
+                                           newWindow.document.write(`
+                                             <html>
+                                               <head>
+                                                 <title>Certificate - ${participant.name}</title>
+                                                 <style>
+                                                   body { margin: 0; padding: 20px; text-align: center; font-family: Arial, sans-serif; }
+                                                   iframe { width: 100%; height: 500px; border: 1px solid #ddd; }
+                                                   h2 { margin-bottom: 20px; }
+                                                 </style>
+                                               </head>
+                                               <body>
+                                                 <h2>Certificate for ${participant.name}</h2>
+                                                 <p><strong>Certificate Number:</strong> ${certificate.certificate_number}</p>
+                                                 <iframe src="${certificate.certificate_url}" title="Certificate for ${participant.name}"></iframe>
+                                               </body>
+                                             </html>
+                                           `);
+                                         }
+                                       }}
                                     >
                                       <Eye className="w-3 h-3 mr-1" />
                                       Preview
@@ -1105,13 +812,13 @@ export default function Certification() {
                                     <Button 
                                       variant="outline" 
                                       size="sm"
-                                      onClick={() => {
-                                        // Download certificate
-                                        const link = document.createElement('a');
-                                        link.href = certificate.certificate_url;
-                                        link.download = `Certificate_${participant.name.replace(/\s+/g, '_')}_${certificate.certificate_number}.png`;
-                                        link.click();
-                                      }}
+                                                                             onClick={() => {
+                                         // Download certificate
+                                         const link = document.createElement('a');
+                                         link.href = certificate.certificate_url;
+                                         link.download = `Certificate_${participant.name.replace(/\s+/g, '_')}_${certificate.certificate_number}.pdf`;
+                                         link.click();
+                                       }}
                                     >
                                       <Download className="w-3 h-3 mr-1" />
                                       Download
@@ -1154,12 +861,12 @@ export default function Certification() {
                       .filter(cert => cert.certificate_url)
                       .map((certificate) => (
                         <div key={certificate.id} className="border rounded-lg p-4">
-                          <div className="aspect-[4/3] mb-3 overflow-hidden rounded border">
-                            <img 
-                              src={certificate.certificate_url} 
-                              alt={`Certificate for ${certificate.participant_name}`}
-                              className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
-                              onClick={() => {
+                                                     <div className="aspect-[4/3] mb-3 overflow-hidden rounded border">
+                             <iframe 
+                               src={certificate.certificate_url} 
+                               title={`Certificate for ${certificate.participant_name}`}
+                               className="w-full h-full cursor-pointer"
+                               onClick={() => {
                                 const newWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes,resizable=yes');
                                 if (newWindow) {
                                   newWindow.document.write(`
@@ -1237,13 +944,11 @@ export default function Certification() {
                                             <p><strong>Status:</strong> ${certificate.status}</p>
                                           </div>
                                           
-                                          <img 
-                                            src="${certificate.certificate_url}" 
-                                            alt="Certificate for ${certificate.participant_name}"
-                                            class="certificate-img"
-                                            onload="console.log('Certificate image loaded successfully')"
-                                            onerror="console.error('Failed to load certificate image'); this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjNmNGY2Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzZiNzI4MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkZhaWxlZCB0byBsb2FkIGNlcnRpZmljYXRlPC90ZXh0Pjwvc3ZnPic='"
-                                          />
+                                                                                     <iframe 
+                                             src="${certificate.certificate_url}" 
+                                             style="width: 100%; height: 400px; border: none;"
+                                             title="Certificate for ${certificate.participant_name}"
+                                           ></iframe>
                                           
                                           <div class="actions">
                                             <button class="btn" onclick="downloadCertificate()">
@@ -1256,14 +961,14 @@ export default function Certification() {
                                         </div>
                                         
                                         <script>
-                                          function downloadCertificate() {
-                                            const link = document.createElement('a');
-                                            link.href = "${certificate.certificate_url}";
-                                            link.download = "Certificate_${certificate.participant_name.replace(/[^a-zA-Z0-9]/g, '_')}_${certificate.certificate_number}.png";
-                                            document.body.appendChild(link);
-                                            link.click();
-                                            document.body.removeChild(link);
-                                          }
+                                                                                     function downloadCertificate() {
+                                             const link = document.createElement('a');
+                                             link.href = "${certificate.certificate_url}";
+                                             link.download = "Certificate_${certificate.participant_name.replace(/[^a-zA-Z0-9]/g, '_')}_${certificate.certificate_number}.pdf";
+                                             document.body.appendChild(link);
+                                             link.click();
+                                             document.body.removeChild(link);
+                                           }
                                           
                                           // Debug: Log the certificate URL
                                           console.log('Certificate URL:', "${certificate.certificate_url}");
