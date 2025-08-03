@@ -138,7 +138,7 @@ async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
   try {
     console.log('📤 Sending email via Resend...');
     const emailResponse = await resend.emails.send({
-      from: 'Metascholar Institute <onboarding@resend.dev>',
+      from: 'Metascholar Institute <support@academicdigital.space>',
       to: [emailData.to],
       subject: emailData.subject,
       html: htmlContent,
