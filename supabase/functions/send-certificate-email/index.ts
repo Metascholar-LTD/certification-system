@@ -14,10 +14,11 @@ interface EmailRequest {
   certificate_url: string;
 }
 
-// Simplified email sending function using fetch to a reliable email service
+// Simplified email sending function
 async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
   const smtpPassword = Deno.env.get('SMTP_PASSWORD');
   if (!smtpPassword) {
+    console.error('❌ SMTP_PASSWORD not configured in environment variables');
     throw new Error('SMTP_PASSWORD not configured');
   }
 
