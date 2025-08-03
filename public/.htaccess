@@ -1,6 +1,16 @@
 RewriteEngine On
 RewriteBase /
 
+# Set correct MIME types for JavaScript modules
+<FilesMatch "\.js$">
+    Header set Content-Type "application/javascript"
+</FilesMatch>
+
+# Set correct MIME types for CSS files
+<FilesMatch "\.css$">
+    Header set Content-Type "text/css"
+</FilesMatch>
+
 # Handle Angular and React Router
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
