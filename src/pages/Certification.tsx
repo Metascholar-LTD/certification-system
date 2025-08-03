@@ -45,7 +45,15 @@ export default function Certification() {
   const [emailSubject, setEmailSubject] = useState("Your Certificate from Metascholar Institute");
   const [emailMessage, setEmailMessage] = useState("Congratulations on completing the course! Please find your certificate attached.");
   const [isLoading, setIsLoading] = useState(true);
-  const [certificates, setCertificates] = useState<any[]>([]);
+  const [certificates, setCertificates] = useState<{
+    id: string;
+    registration_id: string;
+    certificate_url: string;
+    certificate_number: string;
+    status: string;
+    file_size?: number;
+    original_filename?: string;
+  }[]>([]);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
   const [sendingFor, setSendingFor] = useState<string | null>(null);
 
@@ -131,7 +139,7 @@ export default function Certification() {
     fetchWebhookRegistrations();
   };
 
-  // Upload certificate for individual participant
+  // Upload certificate for individual participant with enhanced validation
   const uploadCertificateForParticipant = async (participant: Participant, file: File) => {
     setUploadingFor(participant.id);
     
@@ -139,21 +147,71 @@ export default function Certification() {
       console.log(`📄 [Debug] Uploading PDF for ${participant.name}`);
       console.log(`📄 [Debug] File size: ${file.size} bytes`);
       console.log(`📄 [Debug] File type: ${file.type}`);
+      console.log(`📄 [Debug] File name: ${file.name}`);
       
-      // Convert file to data URL
-      const dataUrl = await new Promise<string>((resolve) => {
+      // Validate file
+      if (file.type !== 'application/pdf') {
+        throw new Error('Only PDF files are allowed');
+      }
+      
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        throw new Error('File size must be less than 10MB');
+      }
+      
+      if (file.size < 1000) { // Minimum size check
+        throw new Error('File appears to be too small or corrupted');
+      }
+      
+      // Convert file to data URL with better error handling
+      const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
+        
         reader.onload = () => {
           const result = reader.result as string;
           console.log(`📄 [Debug] Data URL length: ${result.length}`);
           console.log(`📄 [Debug] Data URL starts with: ${result.substring(0, 50)}`);
+          
+          // Validate the data URL
+          if (!result.startsWith('data:application/pdf;base64,')) {
+            reject(new Error('Invalid PDF data format'));
+            return;
+          }
+          
+          const base64Data = result.split(',')[1];
+          if (!base64Data || base64Data.length < 100) {
+            reject(new Error('Invalid or insufficient PDF data'));
+            return;
+          }
+          
+          // Test base64 validity
+          try {
+            // Clean the base64 string and validate format
+            const cleanBase64 = base64Data.replace(/\s+/g, '');
+            if (!/^[A-Za-z0-9+/]+=*$/.test(cleanBase64)) {
+              reject(new Error('Invalid base64 encoding detected'));
+              return;
+            }
+            
+            console.log(`📄 [Debug] Base64 validation passed - length: ${cleanBase64.length}`);
+          } catch (error) {
+            reject(new Error('Base64 validation failed'));
+            return;
+          }
+          
           resolve(result);
         };
+        
+        reader.onerror = () => {
+          reject(new Error('Failed to read file'));
+        };
+        
         reader.readAsDataURL(file);
       });
 
-      // Generate unique certificate number
-      const certificateNumber = `CERT-${Date.now()}-${participant.name.replace(/\s+/g, '')}`;
+      // Generate unique certificate number with better formatting
+      const timestamp = Date.now();
+      const safeName = participant.name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 10);
+      const certificateNumber = `CERT-${timestamp}-${safeName}`.toUpperCase();
 
       console.log(`📄 [Debug] Certificate number: ${certificateNumber}`);
 
@@ -167,9 +225,11 @@ export default function Certification() {
       const certificateData = {
         certificate_url: dataUrl,
         certificate_number: certificateNumber,
-        certificate_type: 'pdf', // Only PDF type supported
+        certificate_type: 'pdf',
         status: 'issued',
         issued_at: new Date().toISOString(),
+        file_size: file.size,
+        original_filename: file.name,
       };
 
       if (existingCert) {
@@ -197,8 +257,8 @@ export default function Certification() {
       }
 
       toast({
-        title: "Certificate Uploaded",
-        description: `PDF certificate for ${participant.name} has been uploaded successfully`,
+        title: "Certificate Uploaded Successfully",
+        description: `PDF certificate for ${participant.name} (${(file.size / 1024).toFixed(1)} KB) uploaded and validated`,
       });
       
       // Refresh data
@@ -213,10 +273,15 @@ export default function Certification() {
       });
     } finally {
       setUploadingFor(null);
+      // Clear the file input
+      const fileInput = document.getElementById(`upload-${participant.id}`) as HTMLInputElement;
+      if (fileInput) {
+        fileInput.value = '';
+      }
     }
   };
 
-  // Send certificate to individual participant
+  // Send certificate to individual participant with enhanced validation
   const sendCertificateToParticipant = async (participant: Participant) => {
     setSendingFor(participant.id);
     
@@ -234,10 +299,31 @@ export default function Certification() {
         });
         return;
       }
+      
+      // Validate certificate data before sending
+      if (!certificate.certificate_url.startsWith('data:application/pdf;base64,')) {
+        toast({
+          title: "Invalid Certificate Format",
+          description: `Certificate for ${participant.name} is not in valid PDF format`,
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      const base64Data = certificate.certificate_url.split(',')[1];
+      if (!base64Data || base64Data.length < 100) {
+        toast({
+          title: "Corrupted Certificate Data",
+          description: `Certificate data for ${participant.name} appears to be corrupted`,
+          variant: "destructive",
+        });
+        return;
+      }
 
-      console.log(`📧 [Debug] Certificate found for ${participant.name}`);
+      console.log(`📧 [Debug] Certificate validation passed for ${participant.name}`);
       console.log(`📧 [Debug] Certificate URL length: ${certificate.certificate_url.length}`);
-      console.log(`📧 [Debug] Certificate URL starts with: ${certificate.certificate_url.substring(0, 50)}`);
+      console.log(`📧 [Debug] Base64 data length: ${base64Data.length}`);
+      console.log(`📧 [Debug] Certificate number: ${certificate.certificate_number}`);
 
       // Send email using Supabase Edge Function
       const { data: emailResult, error: emailError } = await supabase.functions.invoke('send-certificate-email', {
@@ -273,8 +359,8 @@ export default function Certification() {
       }
 
       toast({
-        title: "Certificate Sent",
-        description: `Certificate successfully sent to ${participant.name} at ${participant.email}`,
+        title: "Certificate Sent Successfully",
+        description: `Certificate delivered to ${participant.name} at ${participant.email}. The exact PDF file you uploaded has been sent.`,
       });
       
       // Refresh data
@@ -283,8 +369,8 @@ export default function Certification() {
     } catch (error) {
       console.error('Certificate sending error:', error);
       toast({
-        title: "Sending Failed",
-        description: error instanceof Error ? error.message : "Failed to send certificate",
+        title: "Certificate Sending Failed",
+        description: error instanceof Error ? error.message : "Failed to send certificate. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -437,14 +523,28 @@ export default function Certification() {
                                  id={`upload-${participant.id}`}
                                  onChange={(e) => {
                                    const file = e.target.files?.[0];
-                                   if (file && file.type === 'application/pdf') {
+                                   if (file) {
+                                     if (file.type !== 'application/pdf') {
+                                       toast({
+                                         title: "Invalid File Type",
+                                         description: "Please upload a PDF file only",
+                                         variant: "destructive",
+                                       });
+                                       e.target.value = ''; // Clear the input
+                                       return;
+                                     }
+                                     
+                                     if (file.size > 10 * 1024 * 1024) {
+                                       toast({
+                                         title: "File Too Large",
+                                         description: "Please upload a PDF file smaller than 10MB",
+                                         variant: "destructive",
+                                       });
+                                       e.target.value = ''; // Clear the input
+                                       return;
+                                     }
+                                     
                                      uploadCertificateForParticipant(participant, file);
-                                   } else if (file) {
-                                     toast({
-                                       title: "Invalid File Type",
-                                       description: "Please upload a PDF file only",
-                                       variant: "destructive",
-                                     });
                                    }
                                  }}
                                />

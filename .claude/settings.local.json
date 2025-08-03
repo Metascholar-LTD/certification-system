@@ -3,7 +3,9 @@
   "permissions": {
     "allow": [
       "Bash(supabase db:*)",
-      "Bash(npx supabase:*)"
+      "Bash(npx supabase:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run:*)"
     ],
     "deny": []
   }

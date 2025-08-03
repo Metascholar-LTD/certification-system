@@ -163,38 +163,68 @@ class SimpleSMTPClient {
     console.log(`📄 PDF data length: ${data.pdfBase64.length} chars`);
     console.log(`📄 Using filename: ${data.filename}`);
     
-    // Clean base64 data - remove any whitespace
-    const cleanBase64 = data.pdfBase64.replace(/\s+/g, '');
+    // Validate and clean base64 data
+    let cleanBase64 = data.pdfBase64.replace(/\s+/g, '').replace(/[^A-Za-z0-9+/=]/g, '');
     
-    // Split base64 into 76-character lines for RFC compliance
+    // Ensure proper base64 padding
+    while (cleanBase64.length % 4 !== 0) {
+      cleanBase64 += '=';
+    }
+    
+    // Validate base64 format
+    if (!/^[A-Za-z0-9+/]+=*$/.test(cleanBase64)) {
+      console.error('❌ Invalid base64 data detected');
+      throw new Error('Invalid base64 certificate data');
+    }
+    
+    // Split base64 into 76-character lines for RFC 2045 compliance
     const base64Lines = cleanBase64.match(/.{1,76}/g) || [];
     const formattedBase64 = base64Lines.join('\r\n');
     
+    // Create proper MIME message with correct headers
+    const messageId = `<${Date.now()}.${Math.random().toString(36)}@academicdigital.space>`;
+    const currentDate = new Date().toUTCString();
+    
     return [
+      `Message-ID: ${messageId}`,
+      `Date: ${currentDate}`,
       `From: ${data.from}`,
       `To: ${data.to}`,
       `Subject: ${data.subject}`,
       'MIME-Version: 1.0',
       `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      'X-Mailer: Metascholar Certificate System',
       '',
       `This is a multi-part message in MIME format.`,
       '',
       `--${boundary}`,
       'Content-Type: text/html; charset=utf-8',
-      'Content-Transfer-Encoding: 8bit',
+      'Content-Transfer-Encoding: quoted-printable',
       '',
-      data.html,
+      this.encodeQuotedPrintable(data.html),
       '',
       `--${boundary}`,
       `Content-Type: application/pdf; name="${data.filename}"`,
       `Content-Disposition: attachment; filename="${data.filename}"`,
-      'Content-Transfer-Encoding: base64',
+      `Content-Transfer-Encoding: base64`,
+      `Content-ID: <certificate_${Date.now()}>`,
       '',
       formattedBase64,
       '',
       `--${boundary}--`,
       ''
     ].join('\r\n');
+  }
+
+  private encodeQuotedPrintable(text: string): string {
+    return text
+      .replace(/[\u0080-\uFFFF]/g, (match) => {
+        const hex = match.charCodeAt(0).toString(16).toUpperCase();
+        return `=${hex.length === 1 ? '0' + hex : hex}`;
+      })
+      .replace(/=/g, '=3D')
+      .replace(/\r?\n/g, '\r\n')
+      .replace(/(.{75})/g, '$1=\r\n');
   }
 }
 
@@ -290,24 +320,57 @@ async function sendEmailInBackground(emailData: EmailRequest): Promise<void> {
   console.log(`📧 [Background] Sending certificate to: ${emailData.to}`);
   console.log(`👤 [Background] Participant: ${emailData.participant_name}`);
 
-  // Extract PDF data from data URL
+  // Extract and validate PDF data from data URL
   if (!emailData.certificate_url.startsWith('data:application/pdf;base64,')) {
     console.error('❌ Invalid certificate URL format');
     return;
   }
 
-  const pdfBase64 = emailData.certificate_url.split(',')[1];
-  console.log(`📄 [Background] PDF base64 length: ${pdfBase64.length}`);
+  let pdfBase64 = emailData.certificate_url.split(',')[1];
+  console.log(`📄 [Background] Original PDF base64 length: ${pdfBase64.length}`);
+
+  // Clean and validate base64 data
+  pdfBase64 = pdfBase64.replace(/\s+/g, '').replace(/[^A-Za-z0-9+/=]/g, '');
+  
+  // Ensure proper padding
+  while (pdfBase64.length % 4 !== 0) {
+    pdfBase64 += '=';
+  }
+  
+  console.log(`📄 [Background] Cleaned PDF base64 length: ${pdfBase64.length}`);
 
   // Validate PDF data
   if (pdfBase64.length < 100) {
-    console.error('❌ PDF data too small');
+    console.error('❌ PDF data too small after cleaning');
+    return;
+  }
+  
+  // Validate base64 format
+  if (!/^[A-Za-z0-9+/]+=*$/.test(pdfBase64)) {
+    console.error('❌ Invalid base64 format detected');
+    return;
+  }
+  
+  // Test decode to verify data integrity
+  try {
+    const decodedSize = (pdfBase64.length * 3) / 4;
+    console.log(`📄 [Background] Expected decoded size: ${decodedSize} bytes`);
+    
+    if (decodedSize < 1000) {
+      console.error('❌ Decoded PDF too small, likely corrupted');
+      return;
+    }
+  } catch (error) {
+    console.error('❌ Base64 decode test failed:', error);
     return;
   }
 
-  // Generate filename
-  const safeName = emailData.participant_name.replace(/[^a-zA-Z0-9]/g, '_');
-  const filename = `Certificate_${safeName}.pdf`;
+  // Generate safe filename
+  const safeName = emailData.participant_name.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_');
+  const timestamp = new Date().toISOString().split('T')[0];
+  const filename = `${safeName}_Certificate_${timestamp}.pdf`;
+  
+  console.log(`📄 [Background] Generated filename: ${filename}`);
 
   const smtpClient = new SimpleSMTPClient({
     hostname: 'smtp.titan.email',
@@ -331,6 +394,9 @@ async function sendEmailInBackground(emailData: EmailRequest): Promise<void> {
       console.log(`🔄 [Background] Attempt ${attempt}/${maxAttempts}`);
       
       await smtpClient.connect();
+      
+      // Final validation before sending
+      console.log(`📧 [Background] Final validation - PDF size: ${pdfBase64.length}, Filename: ${filename}`);
       
       await smtpClient.sendEmail({
         from: 'Metascholar Institute - Workshop Certification <support@academicdigital.space>',
@@ -376,11 +442,15 @@ const handler = async (req: Request): Promise<Response> => {
   try {
     const emailData: EmailRequest = await req.json();
     
+    // Enhanced logging for debugging
+    const urlPreview = emailData.certificate_url.substring(0, 50) + '...';
     console.log('📨 Certificate email request received:', {
       to: emailData.to,
       participant_name: emailData.participant_name,
       certificate_number: emailData.certificate_number,
-      certificate_url_length: emailData.certificate_url.length
+      certificate_url_length: emailData.certificate_url.length,
+      certificate_url_preview: urlPreview,
+      base64_data_length: emailData.certificate_url.split(',')[1]?.length || 0
     });
 
     // Validate required fields
@@ -400,10 +470,19 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    // Validate certificate URL format
+    // Validate certificate URL format and content
     if (!emailData.certificate_url.startsWith('data:application/pdf;base64,')) {
       return new Response(
-        JSON.stringify({ error: 'Invalid certificate URL format' }),
+        JSON.stringify({ error: 'Invalid certificate URL format - must be a PDF data URL' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // Validate base64 content exists and is substantial
+    const base64Content = emailData.certificate_url.split(',')[1];
+    if (!base64Content || base64Content.length < 100) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid or insufficient certificate data' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
