@@ -469,9 +469,9 @@ async function sendEmailInBackground(emailData: {
           console.warn(`⚠️ [Debug] Could not validate PDF header: ${e}`);
         }
         
-        // Ensure base64 is properly formatted for email (no line breaks in the middle)
-        // Base64 should be continuous without line breaks for email attachments
-        console.log(`✅ [Debug] Cleaned PDF base64 data length: ${pdfData.length}`);
+        // Format base64 for email attachment (RFC 2045 - 76 chars per line)
+        const formattedPdfData = pdfData.match(/.{1,76}/g)?.join('\r\n') || pdfData;
+        console.log(`✅ [Debug] Formatted PDF base64 data with proper line breaks`);
         
         // Final validation - ensure we have valid base64 data
         if (pdfData.length < 100) {
@@ -486,6 +486,9 @@ async function sendEmailInBackground(emailData: {
         }
         
         console.log(`✅ [Debug] PDF data validation passed`);
+        
+        // Update pdfData to use the formatted version
+        pdfData = formattedPdfData;
         
       } else {
         console.error(`❌ [Debug] Invalid certificate format. Expected PDF data URL, got: ${emailData.certificate_url.substring(0, 50)}`);
