@@ -53,7 +53,7 @@ class TitanSMTPClient {
     }
   }
 
-  async sendEmail(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string }): Promise<void> {
+  async sendEmail(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string; filename?: string }): Promise<void> {
     if (!this.conn) throw new Error('Not connected to SMTP server');
 
     try {
@@ -86,14 +86,14 @@ class TitanSMTPClient {
       console.log('📄 Preparing to send email content...');
       await this.sendCommand('DATA', '', '354');
       
-      // Build email content
       const emailContent = this.buildEmailMessage({
         from: emailData.from,
         to: emailData.to,
         subject: emailData.subject,
         html: emailData.html,
         pdfData: emailData.pdfData,
-        participantName: emailData.participantName
+        participantName: emailData.participantName,
+        filename: emailData.filename
       });
       console.log(`📦 Email content size: ${emailContent.length} characters`);
       
@@ -241,7 +241,7 @@ class TitanSMTPClient {
     return response.trim();
   }
 
-  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string }): string {
+  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string; pdfData?: string; participantName?: string; filename?: string }): string {
     if (!emailData.pdfData) {
       // Email without PDF attachment
       return [
@@ -262,11 +262,8 @@ class TitanSMTPClient {
     console.log(`📄 [Debug] Building MIME email with boundary: ${boundary}`);
     console.log(`📄 [Debug] Raw PDF data length: ${emailData.pdfData.length} chars`);
     
-    // Generate proper filename with participant name
-    const safeName = emailData.participantName ? 
-      emailData.participantName.replace(/[^a-zA-Z0-9]/g, '_') : 
-      'participant';
-    const filename = `Certificate_${safeName}.pdf`;
+    // Use the provided filename or generate one as fallback
+    const filename = emailData.filename || `Certificate_${(emailData.participantName || 'participant').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
     
     return [
       `From: ${emailData.from}`,
@@ -439,6 +436,7 @@ async function sendEmailInBackground(emailData: {
       
       // Extract PDF base64 data from data URL
       let pdfData = '';
+      let originalFilename = 'Certificate.pdf';
       
       console.log(`🔍 [Debug] Certificate URL format: ${emailData.certificate_url.substring(0, 100)}...`);
       console.log(`🔍 [Debug] Certificate URL length: ${emailData.certificate_url.length}`);
@@ -446,7 +444,7 @@ async function sendEmailInBackground(emailData: {
       if (emailData.certificate_url.startsWith('data:application/pdf;base64,')) {
         pdfData = emailData.certificate_url.split(',')[1];
         console.log(`✅ [Debug] Extracted PDF base64 data length: ${pdfData.length}`);
-        console.log(`🔍 [Debug] First 100 chars of base64: ${pdfData.substring(0, 100)}`);
+        console.log(`🔍 [Debug] First 50 chars of base64: ${pdfData.substring(0, 50)}`);
         
         // Validate that we have actual PDF data
         if (!pdfData || pdfData.length === 0) {
@@ -454,12 +452,12 @@ async function sendEmailInBackground(emailData: {
           throw new Error('PDF data is empty');
         }
         
-        // Clean up base64 data - remove any whitespace or line breaks
-        pdfData = pdfData.replace(/\s/g, '');
+        // Only remove line breaks and carriage returns, preserve the actual base64 content
+        pdfData = pdfData.replace(/[\r\n]/g, '');
         
         // Basic validation - PDF files should start with %PDF when decoded
         try {
-          const firstBytes = atob(pdfData.substring(0, 8));
+          const firstBytes = atob(pdfData.substring(0, 12)); // Check first few bytes
           if (!firstBytes.startsWith('%PDF')) {
             console.warn(`⚠️ [Debug] Warning: Data doesn't appear to be a valid PDF (first bytes: ${firstBytes})`);
           } else {
@@ -469,25 +467,25 @@ async function sendEmailInBackground(emailData: {
           console.warn(`⚠️ [Debug] Could not validate PDF header: ${e}`);
         }
         
-        // Format base64 for email attachment (RFC 2045 - 76 chars per line)
-        const formattedPdfData = pdfData.match(/.{1,76}/g)?.join('\r\n') || pdfData;
-        console.log(`✅ [Debug] Formatted PDF base64 data with proper line breaks`);
-        
-        // Final validation - ensure we have valid base64 data
-        if (pdfData.length < 100) {
-          console.error(`❌ [Debug] PDF data too short: ${pdfData.length} chars`);
-          throw new Error('PDF data appears to be corrupted or too small');
-        }
-        
-        // Validate base64 format
+        // Validate base64 format (allow padding characters)
         if (!/^[A-Za-z0-9+/]*={0,2}$/.test(pdfData)) {
           console.error(`❌ [Debug] Invalid base64 format detected`);
           throw new Error('PDF data is not in valid base64 format');
         }
         
-        console.log(`✅ [Debug] PDF data validation passed`);
+        // Format base64 for email attachment (RFC 2045 - 76 chars per line)
+        const formattedPdfData = pdfData.match(/.{1,76}/g)?.join('\r\n') || pdfData;
         
-        // Update pdfData to use the formatted version
+        // Generate filename with participant name but keep .pdf extension
+        const safeName = emailData.participant_name ? 
+          emailData.participant_name.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_') : 
+          'Participant';
+        originalFilename = `${safeName}_Certificate.pdf`;
+        
+        console.log(`✅ [Debug] PDF data validation passed`);
+        console.log(`📄 [Debug] Using filename: ${originalFilename}`);
+        
+        // Use the formatted version
         pdfData = formattedPdfData;
         
       } else {
@@ -505,6 +503,7 @@ async function sendEmailInBackground(emailData: {
         html: htmlContent,
         pdfData: pdfData,
         participantName: emailData.participant_name,
+        filename: originalFilename,
       });
       
       await smtpClient.disconnect();
