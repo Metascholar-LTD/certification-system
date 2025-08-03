@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { Resend } from "npm:resend@2.0.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,228 +12,6 @@ interface EmailRequest {
   content: string;
   participant_name: string;
   email_type?: 'welcome' | 'reminder' | 'update' | 'custom';
-}
-
-// Optimized SMTP client for participant messaging
-class ParticipantSMTPClient {
-  private config: {
-    hostname: string;
-    port: number;
-    username: string;
-    password: string;
-  };
-  private conn: Deno.TlsConn | null = null;
-  private encoder = new TextEncoder();
-  private decoder = new TextDecoder();
-
-  constructor(config: { hostname: string; port: number; username: string; password: string }) {
-    this.config = config;
-  }
-
-  async connect(): Promise<void> {
-    console.log(`🔌 [Messaging] Connecting to ${this.config.hostname}:${this.config.port}...`);
-    
-    try {
-      this.conn = await Deno.connectTls({
-        hostname: this.config.hostname,
-        port: this.config.port,
-      });
-
-      const greeting = await this.readResponse();
-      console.log('📡 [Messaging] Server greeting:', greeting.substring(0, 100));
-      
-      if (!greeting.startsWith('220')) {
-        throw new Error(`SMTP connection rejected: ${greeting}`);
-      }
-      
-      console.log('✅ [Messaging] SMTP connection established');
-    } catch (error) {
-      console.error('❌ [Messaging] SMTP connection failed:', error);
-      throw error;
-    }
-  }
-
-  async sendEmail(emailData: { from: string; to: string; subject: string; html: string }): Promise<void> {
-    if (!this.conn) throw new Error('Not connected to SMTP server');
-
-    try {
-      console.log('📧 [Messaging] Starting SMTP email transaction...');
-      console.log(`📬 [Messaging] From: ${emailData.from} → To: ${emailData.to}`);
-      
-      // EHLO command
-      await this.sendCommand('EHLO', this.config.hostname, '250');
-      
-      // AUTH LOGIN
-      await this.sendCommand('AUTH', 'LOGIN', '334');
-      
-      // Username (base64)
-      await this.sendCommand(btoa(this.config.username), '', '334');
-      
-      // Password (base64)
-      await this.sendCommand(btoa(this.config.password), '', '235');
-      console.log('✅ [Messaging] Authentication successful');
-      
-      // MAIL FROM - extract plain email address
-      const plainEmail = emailData.from.match(/<(.+)>/) ? emailData.from.match(/<(.+)>/)?.[1] : emailData.from;
-      await this.sendCommand('MAIL', `FROM:<${plainEmail}>`, '250');
-      
-      // RCPT TO
-      await this.sendCommand('RCPT', `TO:<${emailData.to}>`, '250');
-      
-      // DATA command
-      await this.sendCommand('DATA', '', '354');
-      
-      // Build and send email content
-      const emailContent = this.buildEmailMessage(emailData);
-      console.log(`📦 [Messaging] Email content size: ${emailContent.length} characters`);
-      
-      await this.sendEmailContent(emailContent);
-      
-      // Send termination sequence
-      await this.conn.write(this.encoder.encode('\r\n.\r\n'));
-      
-      // Read final response
-      const finalResponse = await this.readResponse();
-      console.log('📨 [Messaging] Final SMTP response:', finalResponse);
-      
-      if (!finalResponse.startsWith('250')) {
-        throw new Error(`Email delivery failed: ${finalResponse}`);
-      }
-      
-      console.log('🎉 [Messaging] Email sent successfully!');
-      
-    } catch (error) {
-      console.error('💥 [Messaging] SMTP transaction failed:', error);
-      throw error;
-    }
-  }
-
-  private async sendEmailContent(content: string): Promise<void> {
-    const chunkSize = 64 * 1024; // 64KB chunks
-    const totalSize = content.length;
-    
-    if (totalSize > chunkSize) {
-      console.log(`📚 [Messaging] Sending large email in chunks (${Math.ceil(totalSize / chunkSize)} chunks)`);
-      
-      for (let i = 0; i < totalSize; i += chunkSize) {
-        const chunk = content.slice(i, i + chunkSize);
-        await this.conn!.write(this.encoder.encode(chunk));
-        
-        if (i + chunkSize < totalSize) {
-          await new Promise(resolve => setTimeout(resolve, 10));
-        }
-      }
-    } else {
-      await this.conn!.write(this.encoder.encode(content));
-    }
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.conn) {
-      try {
-        console.log('👋 [Messaging] Disconnecting from SMTP server...');
-        await this.sendCommand('QUIT', '', '221');
-      } catch (e) {
-        console.warn('⚠️ [Messaging] QUIT command failed:', e);
-      } finally {
-        this.conn.close();
-        this.conn = null;
-        console.log('🔌 [Messaging] SMTP connection closed');
-      }
-    }
-  }
-
-  private async sendCommand(command: string, parameter: string, expectedCode: string): Promise<void> {
-    if (!this.conn) throw new Error('Not connected');
-    
-    const fullCommand = parameter ? `${command} ${parameter}` : command;
-    const isPassword = fullCommand.includes(btoa(this.config.password));
-    const isUsername = fullCommand.includes(btoa(this.config.username));
-    
-    const logCommand = isPassword ? '[PASSWORD]' : 
-                      isUsername ? '[USERNAME]' : fullCommand;
-    
-    console.log('📤 [Messaging] SMTP >', logCommand);
-    
-    await this.conn.write(this.encoder.encode(fullCommand + '\r\n'));
-    
-    const response = await this.readResponse();
-    console.log('📥 [Messaging] SMTP <', response.substring(0, 150));
-    
-    if (!response.startsWith(expectedCode)) {
-      throw new Error(`SMTP command failed: ${command} - Expected ${expectedCode}, got: ${response}`);
-    }
-  }
-
-  private async readResponse(): Promise<string> {
-    if (!this.conn) throw new Error('Not connected');
-    
-    const buffer = new Uint8Array(8192);
-    let response = '';
-    let attempts = 0;
-    const maxAttempts = 30;
-    
-    while (attempts < maxAttempts) {
-      try {
-        const n = await this.conn.read(buffer);
-        if (n === null) {
-          console.log('📡 [Messaging] Connection closed by server');
-          break;
-        }
-        
-        const chunk = this.decoder.decode(buffer.subarray(0, n));
-        response += chunk;
-        
-        const lines = response.split('\r\n');
-        
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const line = lines[i];
-          if (line && line.length >= 4) {
-            const code = line.substring(0, 3);
-            const separator = line.charAt(3);
-            
-            if (/^\d{3}$/.test(code) && separator === ' ') {
-              return response.trim();
-            }
-          }
-        }
-        
-        attempts++;
-        
-        if (attempts < maxAttempts) {
-          const delay = Math.min(50 + attempts * 2, 200);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-        
-      } catch (error) {
-        console.error(`📡 [Messaging] Read attempt ${attempts} failed:`, error);
-        attempts++;
-        
-        if (attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      }
-    }
-    
-    if (attempts >= maxAttempts) {
-      console.warn(`⏰ [Messaging] Max attempts reached. Response so far: ${response.substring(0, 200)}`);
-    }
-    
-    return response.trim();
-  }
-
-  private buildEmailMessage(emailData: { from: string; to: string; subject: string; html: string }): string {
-    return [
-      `From: ${emailData.from}`,
-      `To: ${emailData.to}`,
-      `Subject: ${emailData.subject}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=UTF-8',
-      'Content-Transfer-Encoding: 8bit',
-      '',
-      emailData.html
-    ].join('\r\n');
-  }
 }
 
 // Enhanced email template generator for participant messaging
@@ -401,7 +180,7 @@ function generateParticipantEmailTemplate(data: {
   `.trim();
 }
 
-// Background email sending for participant messaging
+// Background email sending using Resend for participant messaging
 async function sendParticipantEmailInBackground(emailData: {
   to: string;
   subject: string;
@@ -409,22 +188,15 @@ async function sendParticipantEmailInBackground(emailData: {
   participant_name: string;
   email_type?: string;
 }): Promise<void> {
-  const smtpPassword = Deno.env.get('SMTP_PASSWORD');
-  if (!smtpPassword) {
-    console.error('❌ [Messaging] SMTP_PASSWORD environment variable not configured');
-    return;
+  const resendApiKey = Deno.env.get('RESEND_API_KEY');
+  if (!resendApiKey) {
+    console.error('❌ [Messaging] RESEND_API_KEY not configured in environment variables');
+    throw new Error('RESEND_API_KEY not configured');
   }
 
   console.log(`📧 [Messaging] Starting email send to: ${emailData.to}`);
   console.log(`👤 [Messaging] Participant: ${emailData.participant_name}`);
   console.log(`📝 [Messaging] Email type: ${emailData.email_type || 'custom'}`);
-
-  const smtpClient = new ParticipantSMTPClient({
-    hostname: 'smtp.titan.email',
-    port: 465,
-    username: 'support@academicdigital.space',
-    password: smtpPassword,
-  });
 
   const htmlContent = generateParticipantEmailTemplate({
     participant_name: emailData.participant_name,
@@ -434,48 +206,26 @@ async function sendParticipantEmailInBackground(emailData: {
 
   console.log(`📄 [Messaging] Generated email content: ${htmlContent.length} characters`);
 
-  let retryCount = 0;
-  const maxRetries = 3;
+  // Use Resend for reliable email delivery
+  const resend = new Resend(resendApiKey);
+  
+  try {
+    console.log('📤 [Messaging] Sending email via Resend...');
+    const emailResponse = await resend.emails.send({
+      from: 'Metascholar Institute <onboarding@resend.dev>',
+      to: [emailData.to],
+      subject: emailData.subject,
+      html: htmlContent,
+    });
 
-  while (retryCount < maxRetries) {
-    try {
-      console.log(`🔄 [Messaging] Attempt ${retryCount + 1}/${maxRetries}`);
-      
-      await smtpClient.connect();
-      
-      await smtpClient.sendEmail({
-        from: 'Metascholar Institute - General Communication <support@academicdigital.space>',
-        to: emailData.to,
-        subject: emailData.subject,
-        html: htmlContent,
-      });
-      
-      await smtpClient.disconnect();
-      
-      console.log(`✅ [Messaging] Email successfully sent to ${emailData.to}`);
-      return; // Success - exit retry loop
-      
-    } catch (error) {
-      console.error(`❌ [Messaging] Attempt ${retryCount + 1} failed:`, error);
-      
-      // Clean up connection on error
-      try {
-        await smtpClient.disconnect();
-      } catch (disconnectError) {
-        console.warn('⚠️ [Messaging] Disconnect error:', disconnectError);
-      }
-      
-      retryCount++;
-      
-      if (retryCount < maxRetries) {
-        const delay = 1000 * retryCount; // Progressive delay
-        console.log(`⏳ [Messaging] Retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-        console.error(`💥 [Messaging] All ${maxRetries} attempts failed for ${emailData.to}`);
-        throw error;
-      }
+    if (emailResponse.error) {
+      throw new Error(`Resend API error: ${emailResponse.error.message}`);
     }
+
+    console.log('✅ [Messaging] Email sent successfully via Resend:', emailResponse.data?.id);
+  } catch (error) {
+    console.error('❌ [Messaging] Resend Email Error:', error);
+    throw error;
   }
 }
 
@@ -516,14 +266,24 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    // Start background email task
-    EdgeRuntime.waitUntil(sendParticipantEmailInBackground({
+    // Send email in background with proper error handling
+    sendParticipantEmailInBackground({
       to,
       subject,
       content,
       participant_name,
       email_type,
-    }));
+    }).then(() => {
+      console.log('✅ [Messaging] Background email sending completed successfully');
+    }).catch(error => {
+      console.error('❌ [Messaging] Background email sending failed:', error);
+      console.error('❌ [Messaging] Error details:', {
+        message: error.message,
+        stack: error.stack,
+        to: to,
+        participant_name: participant_name
+      });
+    });
 
     // Return immediate success response
     return new Response(
