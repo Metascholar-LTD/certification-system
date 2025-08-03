@@ -5,116 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Metascholar Institute - Certification System</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <style>
-      body { 
-        margin: 0; 
-        font-family: Arial, sans-serif; 
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-      }
-      .container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        min-height: 100vh;
-        text-align: center;
-        padding: 20px;
-      }
-      .logo {
-        font-size: 2.5rem;
-        font-weight: bold;
-        margin-bottom: 1rem;
-      }
-      .subtitle {
-        font-size: 1.2rem;
-        margin-bottom: 2rem;
-        opacity: 0.9;
-      }
-      .nav-links {
-        display: flex;
-        gap: 20px;
-        flex-wrap: wrap;
-        justify-content: center;
-      }
-      .nav-link {
-        background: rgba(255, 255, 255, 0.1);
-        padding: 12px 24px;
-        border-radius: 8px;
-        text-decoration: none;
-        color: white;
-        transition: all 0.3s ease;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-      }
-      .nav-link:hover {
-        background: rgba(255, 255, 255, 0.2);
-        transform: translateY(-2px);
-      }
-      .status {
-        margin-top: 2rem;
-        padding: 1rem;
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 8px;
-        font-size: 0.9rem;
-      }
-    </style>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta name="description" content="Lovable Generated Project" />
+    <meta name="author" content="Lovable" />
+
+    <meta property="og:title" content="Metascholar Institute - Certification System" />
+    <meta property="og:description" content="Lovable Generated Project" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@lovable_dev" />
+    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <script type="module" crossorigin src="/src/main.tsx"></script>
   </head>
+
   <body>
-    <div class="container">
-      <div class="logo">Metascholar Institute</div>
-      <div class="subtitle">Certification System</div>
-      
-      <div class="nav-links">
-        <a href="#/" class="nav-link">Home</a>
-        <a href="#/certification" class="nav-link">Certification Portal</a>
-      </div>
-      
-      <div class="status">
-        <p>🚀 Application is loading...</p>
-        <p>If you see this message, the React app is being loaded.</p>
-        <p>Please wait for the full application to load.</p>
-      </div>
-    </div>
-    
-    <script>
-      // Simple navigation for the static version
-      document.addEventListener('DOMContentLoaded', function() {
-        const links = document.querySelectorAll('.nav-link');
-        links.forEach(link => {
-          link.addEventListener('click', function(e) {
-            e.preventDefault();
-            const href = this.getAttribute('href');
-            if (href === '#/') {
-              document.querySelector('.container').innerHTML = `
-                <div class="logo">Metascholar Institute</div>
-                <div class="subtitle">Welcome to the Certification System</div>
-                <div class="nav-links">
-                  <a href="#/" class="nav-link">Home</a>
-                  <a href="#/certification" class="nav-link">Certification Portal</a>
-                </div>
-                <div class="status">
-                  <p>🏠 You are on the Home page</p>
-                  <p>Click "Certification Portal" to access the certification system.</p>
-                </div>
-              `;
-            } else if (href === '#/certification') {
-              document.querySelector('.container').innerHTML = `
-                <div class="logo">Certification Portal</div>
-                <div class="subtitle">Certificate Validation System</div>
-                <div class="nav-links">
-                  <a href="#/" class="nav-link">Home</a>
-                  <a href="#/certification" class="nav-link">Certification Portal</a>
-                </div>
-                <div class="status">
-                  <p>🎓 You are in the Certification Portal</p>
-                  <p>This is where users can validate their certificates.</p>
-                  <p>The full React application should load here.</p>
-                </div>
-              `;
-            }
-          });
-        });
-      });
-    </script>
+    <div id="root"></div>
+
   </body>
 </html> 
