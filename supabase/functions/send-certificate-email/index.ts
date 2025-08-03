@@ -163,21 +163,19 @@ class SimpleSMTPClient {
     console.log(`📄 PDF data length: ${data.pdfBase64.length} chars`);
     console.log(`📄 Using filename: ${data.filename}`);
     
-    // Validate and clean base64 data
-    let cleanBase64 = data.pdfBase64.replace(/\s+/g, '').replace(/[^A-Za-z0-9+/=]/g, '');
+    // MINIMAL base64 cleaning to prevent corruption
+    let cleanBase64 = data.pdfBase64.trim();
     
-    // Ensure proper base64 padding
-    while (cleanBase64.length % 4 !== 0) {
-      cleanBase64 += '=';
-    }
+    // Only remove line breaks and tabs, preserve all valid base64 characters
+    cleanBase64 = cleanBase64.replace(/[\r\n\t]/g, '');
     
-    // Validate base64 format
+    // Validate base64 format without aggressive cleaning
     if (!/^[A-Za-z0-9+/]+=*$/.test(cleanBase64)) {
       console.error('❌ Invalid base64 data detected');
       throw new Error('Invalid base64 certificate data');
     }
     
-    // Split base64 into 76-character lines for RFC 2045 compliance
+    // RFC 2045 compliant line wrapping - split into 76-character lines
     const base64Lines = cleanBase64.match(/.{1,76}/g) || [];
     const formattedBase64 = base64Lines.join('\r\n');
     
@@ -326,18 +324,8 @@ async function sendEmailInBackground(emailData: EmailRequest): Promise<void> {
     return;
   }
 
-  let pdfBase64 = emailData.certificate_url.split(',')[1];
-  console.log(`📄 [Background] Original PDF base64 length: ${pdfBase64.length}`);
-
-  // Clean and validate base64 data
-  pdfBase64 = pdfBase64.replace(/\s+/g, '').replace(/[^A-Za-z0-9+/=]/g, '');
-  
-  // Ensure proper padding
-  while (pdfBase64.length % 4 !== 0) {
-    pdfBase64 += '=';
-  }
-  
-  console.log(`📄 [Background] Cleaned PDF base64 length: ${pdfBase64.length}`);
+  const pdfBase64 = emailData.certificate_url.split(',')[1];
+  console.log(`📄 [Background] PDF base64 length: ${pdfBase64.length}`);
 
   // Validate PDF data
   if (pdfBase64.length < 100) {
