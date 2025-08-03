@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => ({
         manualChunks: undefined,
       },
     },
+    assetsInlineLimit: 0,
   },
   plugins: [
     react(),
