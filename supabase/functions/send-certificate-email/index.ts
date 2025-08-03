@@ -263,8 +263,16 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     // Send email in background with proper error handling
-    sendCertificateEmail(emailData).catch(error => {
-      console.error('❌ Email sending failed:', error);
+    sendCertificateEmail(emailData).then(() => {
+      console.log('✅ Background email sending completed successfully');
+    }).catch(error => {
+      console.error('❌ Background email sending failed:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        stack: error.stack,
+        to: emailData.to,
+        participant_name: emailData.participant_name
+      });
     });
 
     // Return immediate success response
