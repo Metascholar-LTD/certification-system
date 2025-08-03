@@ -15,7 +15,7 @@ interface EmailRequest {
   certificate_url: string;
 }
 
-// Email sending function using SmtpClient
+// Email sending function with PDF attachment support
 async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
   const smtpPassword = Deno.env.get('SMTP_PASSWORD');
   if (!smtpPassword) {
@@ -132,35 +132,95 @@ async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
 </body>
 </html>`;
 
-  // Use SmtpClient for reliable email sending
-  const smtpClient = new SmtpClient({
-    hostname: 'smtp.titan.email',
-    port: 465,
-    username: 'support@academicdigital.space',
-    password: smtpPassword,
-  });
+  // Create proper MIME email with PDF attachment
+  const boundary = `----=NextPart_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+  
+  const emailMessage = [
+    `From: Metascholar Institute <support@academicdigital.space>`,
+    `To: ${emailData.to}`,
+    `Subject: ${emailData.subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/html; charset=utf-8`,
+    `Content-Transfer-Encoding: 8bit`,
+    ``,
+    htmlContent,
+    ``,
+    `--${boundary}`,
+    `Content-Type: application/pdf; name="${filename}"`,
+    `Content-Disposition: attachment; filename="${filename}"`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    ...base64Data.match(/.{1,76}/g) || [base64Data],
+    ``,
+    `--${boundary}--`
+  ].join('\r\n');
 
+  // Send via direct SMTP connection
+  let connection: Deno.TlsConn | null = null;
+  
   try {
-    console.log('🔌 Connecting to SMTP server via SmtpClient...');
-    await smtpClient.connect();
-    
-    console.log('📤 Sending email with PDF attachment...');
-    await smtpClient.sendEmail({
-      from: 'Metascholar Institute <support@academicdigital.space>',
-      to: emailData.to,
-      subject: emailData.subject,
-      html: htmlContent,
-      attachments: [{
-        filename: filename,
-        content: base64Data,
-        contentType: 'application/pdf',
-        encoding: 'base64'
-      }]
+    console.log('🔌 Connecting to SMTP server...');
+    connection = await Deno.connectTls({
+      hostname: 'smtp.titan.email',
+      port: 465,
     });
+
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    // Helper function to read SMTP response
+    const readResponse = async (): Promise<string> => {
+      const buffer = new Uint8Array(8192); // Increased buffer size
+      const result = await connection!.read(buffer);
+      if (result === null) throw new Error('Connection closed unexpectedly');
+      return decoder.decode(buffer.subarray(0, result));
+    };
+
+    // Helper function to send SMTP command
+    const sendCommand = async (command: string): Promise<string> => {
+      console.log(`📤 SMTP: ${command.includes('AUTH') ? '[AUTH COMMAND]' : command}`);
+      await connection!.write(encoder.encode(command + '\r\n'));
+      const response = await readResponse();
+      console.log(`📥 SMTP: ${response.trim()}`);
+      return response;
+    };
+
+    // SMTP conversation
+    await readResponse(); // Server greeting
+    await sendCommand('EHLO academicdigital.space');
+    await sendCommand('AUTH LOGIN');
+    await sendCommand(btoa('support@academicdigital.space'));
+    await sendCommand(btoa(smtpPassword));
+    await sendCommand('MAIL FROM:<support@academicdigital.space>');
+    await sendCommand(`RCPT TO:<${emailData.to}>`);
+    await sendCommand('DATA');
     
-    console.log('✅ Email sent successfully via SmtpClient');
+    // Send the email content with attachment
+    console.log(`📤 Sending email content (${emailMessage.length} bytes)...`);
+    await connection.write(encoder.encode(emailMessage + '\r\n.\r\n'));
+    const finalResponse = await readResponse();
+    
+    if (!finalResponse.includes('250')) {
+      throw new Error(`Email sending failed: ${finalResponse}`);
+    }
+    
+    await sendCommand('QUIT');
+    console.log('✅ Email with PDF attachment sent successfully');
+
+  } catch (error) {
+    console.error('❌ SMTP Error:', error);
+    throw error;
   } finally {
-    await smtpClient.disconnect();
+    if (connection) {
+      try {
+        connection.close();
+      } catch (closeError) {
+        console.warn('Warning: Error closing connection:', closeError);
+      }
+    }
   }
 }
 
