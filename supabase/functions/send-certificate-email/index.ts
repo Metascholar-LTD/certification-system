@@ -256,14 +256,17 @@ class TitanSMTPClient {
       ].join('\r\n');
     }
 
-    // Email with PDF attachment - improved MIME formatting
+    // Email with PDF attachment - FIXED MIME formatting
     const boundary = '----=_NextPart_' + Math.random().toString(36).substring(2);
     
     console.log(`📄 [Debug] Building MIME email with boundary: ${boundary}`);
-    console.log(`📄 [Debug] Raw PDF data length: ${emailData.pdfData.length} chars`);
+    console.log(`📄 [Debug] PDF data length: ${emailData.pdfData.length} chars`);
     
-    // Use the provided filename or generate one as fallback
+    // Use the provided filename or generate one
     const filename = emailData.filename || `Certificate_${(emailData.participantName || 'participant').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+    
+    // CRITICAL FIX: Keep base64 data as single line, no line breaks
+    const cleanPdfData = emailData.pdfData.replace(/\s/g, '');
     
     return [
       `From: ${emailData.from}`,
@@ -283,7 +286,7 @@ class TitanSMTPClient {
       'Content-Disposition: attachment; filename="' + filename + '"',
       'Content-Transfer-Encoding: base64',
       '',
-      emailData.pdfData,
+      cleanPdfData,
       '',
       `--${boundary}--`
     ].join('\r\n');
@@ -446,18 +449,12 @@ async function sendEmailInBackground(emailData: {
         console.log(`✅ [Debug] Extracted PDF base64 data length: ${pdfData.length}`);
         console.log(`🔍 [Debug] First 50 chars of base64: ${pdfData.substring(0, 50)}`);
         
-        // Validate that we have actual PDF data
-        if (!pdfData || pdfData.length === 0) {
-          console.error(`❌ [Debug] Empty PDF data extracted`);
-          throw new Error('PDF data is empty');
-        }
-        
-        // Only remove line breaks and carriage returns, preserve the actual base64 content
-        pdfData = pdfData.replace(/[\r\n]/g, '');
+        // Clean up base64 data - remove any whitespace or line breaks
+        pdfData = pdfData.replace(/\s/g, '');
         
         // Basic validation - PDF files should start with %PDF when decoded
         try {
-          const firstBytes = atob(pdfData.substring(0, 12)); // Check first few bytes
+          const firstBytes = atob(pdfData.substring(0, 8));
           if (!firstBytes.startsWith('%PDF')) {
             console.warn(`⚠️ [Debug] Warning: Data doesn't appear to be a valid PDF (first bytes: ${firstBytes})`);
           } else {
@@ -467,44 +464,52 @@ async function sendEmailInBackground(emailData: {
           console.warn(`⚠️ [Debug] Could not validate PDF header: ${e}`);
         }
         
-        // Validate base64 format (allow padding characters)
+        // Ensure base64 is properly formatted for email (no line breaks in the middle)
+        // Base64 should be continuous without line breaks for email attachments
+        console.log(`✅ [Debug] Cleaned PDF base64 data length: ${pdfData.length}`);
+        
+        // Final validation - ensure we have valid base64 data
+        if (pdfData.length < 100) {
+          console.error(`❌ [Debug] PDF data too short: ${pdfData.length} chars`);
+          throw new Error('PDF data appears to be corrupted or too small');
+        }
+        
+        // Validate base64 format
         if (!/^[A-Za-z0-9+/]*={0,2}$/.test(pdfData)) {
           console.error(`❌ [Debug] Invalid base64 format detected`);
           throw new Error('PDF data is not in valid base64 format');
         }
         
-        // Format base64 for email attachment (RFC 2045 - 76 chars per line)
-        const formattedPdfData = pdfData.match(/.{1,76}/g)?.join('\r\n') || pdfData;
-        
-        // Generate filename with participant name but keep .pdf extension
-        const safeName = emailData.participant_name ? 
-          emailData.participant_name.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_') : 
-          'Participant';
-        originalFilename = `${safeName}_Certificate.pdf`;
-        
         console.log(`✅ [Debug] PDF data validation passed`);
-        console.log(`📄 [Debug] Using filename: ${originalFilename}`);
         
-        // Use the formatted version
-        pdfData = formattedPdfData;
+        // CRITICAL FIX: DO NOT add line breaks to base64 data - keep it as single line
+        // The email client will handle the base64 decoding properly
+        
+        // Generate filename with participant name
+        const safeName = emailData.participant_name ? 
+          emailData.participant_name.replace(/[^a-zA-Z0-9]/g, '_') : 
+          'participant';
+        const filename = `Certificate_${safeName}.pdf`;
+        
+        console.log(`✅ [Debug] Using filename: ${filename}`);
+        
+        console.log(`📧 [Debug] Sending email with PDF data length: ${pdfData.length}`);
+        console.log(`📧 [Debug] Participant name: ${emailData.participant_name}`);
+        
+        await smtpClient.sendEmail({
+          from: 'Metascholar Institute - Workshop Certification <support@academicdigital.space>',
+          to: emailData.to,
+          subject: emailData.subject || `Your Certificate - ${emailData.participant_name}`,
+          html: htmlContent,
+          pdfData: pdfData,
+          participantName: emailData.participant_name,
+          filename: filename,
+        });
         
       } else {
         console.error(`❌ [Debug] Invalid certificate format. Expected PDF data URL, got: ${emailData.certificate_url.substring(0, 50)}`);
         throw new Error('Only PDF certificates are supported');
       }
-
-      console.log(`📧 [Debug] Sending email with PDF data length: ${pdfData.length}`);
-      console.log(`📧 [Debug] Participant name: ${emailData.participant_name}`);
-      
-      await smtpClient.sendEmail({
-        from: 'Metascholar Institute - Workshop Certification <support@academicdigital.space>',
-        to: emailData.to,
-        subject: emailData.subject || `Your Certificate - ${emailData.participant_name}`,
-        html: htmlContent,
-        pdfData: pdfData,
-        participantName: emailData.participant_name,
-        filename: originalFilename,
-      });
       
       await smtpClient.disconnect();
       

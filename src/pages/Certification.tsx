@@ -136,30 +136,41 @@ export default function Certification() {
     setUploadingFor(participant.id);
     
     try {
+      console.log(`📄 [Debug] Uploading PDF for ${participant.name}`);
+      console.log(`📄 [Debug] File size: ${file.size} bytes`);
+      console.log(`📄 [Debug] File type: ${file.type}`);
+      
       // Convert file to data URL
       const dataUrl = await new Promise<string>((resolve) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
+        reader.onload = () => {
+          const result = reader.result as string;
+          console.log(`📄 [Debug] Data URL length: ${result.length}`);
+          console.log(`📄 [Debug] Data URL starts with: ${result.substring(0, 50)}`);
+          resolve(result);
+        };
         reader.readAsDataURL(file);
       });
 
       // Generate unique certificate number
       const certificateNumber = `CERT-${Date.now()}-${participant.name.replace(/\s+/g, '')}`;
 
-             // Check if certificate already exists
-       const { data: existingCert } = await supabase
-         .from('certificates')
-         .select('id')
-         .eq('registration_id', participant.id)
-         .maybeSingle();
+      console.log(`📄 [Debug] Certificate number: ${certificateNumber}`);
 
-       const certificateData = {
-         certificate_url: dataUrl,
-         certificate_number: certificateNumber,
-         certificate_type: 'pdf', // Only PDF type supported
-         status: 'issued',
-         issued_at: new Date().toISOString(),
-       };
+      // Check if certificate already exists
+      const { data: existingCert } = await supabase
+        .from('certificates')
+        .select('id')
+        .eq('registration_id', participant.id)
+        .maybeSingle();
+
+      const certificateData = {
+        certificate_url: dataUrl,
+        certificate_number: certificateNumber,
+        certificate_type: 'pdf', // Only PDF type supported
+        status: 'issued',
+        issued_at: new Date().toISOString(),
+      };
 
       if (existingCert) {
         // Update existing certificate
@@ -169,6 +180,7 @@ export default function Certification() {
           .eq('id', existingCert.id);
 
         if (updateError) throw updateError;
+        console.log(`📄 [Debug] Updated existing certificate for ${participant.name}`);
       } else {
         // Create new certificate record
         const { error: insertError } = await supabase
@@ -181,12 +193,13 @@ export default function Certification() {
           });
 
         if (insertError) throw insertError;
+        console.log(`📄 [Debug] Created new certificate for ${participant.name}`);
       }
 
-             toast({
-         title: "Certificate Uploaded",
-         description: `PDF certificate for ${participant.name} has been uploaded successfully`,
-       });
+      toast({
+        title: "Certificate Uploaded",
+        description: `PDF certificate for ${participant.name} has been uploaded successfully`,
+      });
       
       // Refresh data
       await fetchWebhookRegistrations();
@@ -208,6 +221,8 @@ export default function Certification() {
     setSendingFor(participant.id);
     
     try {
+      console.log(`📧 [Debug] Sending certificate to ${participant.name} at ${participant.email}`);
+      
       // Get certificate for this participant
       const certificate = certificates.find(cert => cert.registration_id === participant.id);
       
@@ -219,6 +234,10 @@ export default function Certification() {
         });
         return;
       }
+
+      console.log(`📧 [Debug] Certificate found for ${participant.name}`);
+      console.log(`📧 [Debug] Certificate URL length: ${certificate.certificate_url.length}`);
+      console.log(`📧 [Debug] Certificate URL starts with: ${certificate.certificate_url.substring(0, 50)}`);
 
       // Send email using Supabase Edge Function
       const { data: emailResult, error: emailError } = await supabase.functions.invoke('send-certificate-email', {
@@ -236,6 +255,8 @@ export default function Certification() {
         console.error('Email sending error:', emailError);
         throw new Error(`Failed to send email to ${participant.email}`);
       }
+
+      console.log(`📧 [Debug] Email sent successfully to ${participant.email}`);
 
       // Update certificate status to sent
       const { error: updateError } = await supabase
