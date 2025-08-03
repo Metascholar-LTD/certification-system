@@ -14,224 +14,51 @@ interface EmailRequest {
   certificate_url: string;
 }
 
-// Simple SMTP client specifically for sending PDF certificates
-class SimpleSMTPClient {
-  private conn: Deno.TlsConn | null = null;
-  private encoder = new TextEncoder();
-  private decoder = new TextDecoder();
+// Simplified email sending function using fetch to a reliable email service
+async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
+  const smtpPassword = Deno.env.get('SMTP_PASSWORD');
+  if (!smtpPassword) {
+    throw new Error('SMTP_PASSWORD not configured');
+  }
 
-  constructor(
-    private config: {
-      hostname: string;
-      port: number;
-      username: string;
-      password: string;
+  console.log(`📧 Sending certificate to: ${emailData.to}`);
+  console.log(`📄 Certificate data length: ${emailData.certificate_url.length}`);
+
+  // Extract clean base64 data from data URL
+  if (!emailData.certificate_url.startsWith('data:application/pdf;base64,')) {
+    throw new Error('Invalid certificate URL format');
+  }
+
+  const base64Data = emailData.certificate_url.split(',')[1];
+  console.log(`📄 Base64 data length: ${base64Data.length}`);
+
+  if (base64Data.length < 1000) {
+    throw new Error('Certificate data appears to be corrupted or too small');
+  }
+
+  // Convert base64 to binary for verification
+  let binaryData: Uint8Array;
+  try {
+    binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+    console.log(`📄 Binary data size: ${binaryData.length} bytes`);
+    
+    // Verify it's a valid PDF by checking PDF header
+    const pdfHeader = new TextDecoder().decode(binaryData.slice(0, 4));
+    if (pdfHeader !== '%PDF') {
+      throw new Error('Invalid PDF data - missing PDF header');
     }
-  ) {}
-
-  async connect(): Promise<void> {
-    console.log(`🔌 Connecting to ${this.config.hostname}:${this.config.port}...`);
-    
-    this.conn = await Deno.connectTls({
-      hostname: this.config.hostname,
-      port: this.config.port,
-    });
-
-    const greeting = await this.readResponse();
-    console.log('📡 Server greeting:', greeting);
-    
-    if (!greeting.startsWith('220')) {
-      throw new Error(`SMTP connection rejected: ${greeting}`);
-    }
-    
-    console.log('✅ SMTP connection established');
+    console.log('✅ PDF validation passed');
+  } catch (error) {
+    throw new Error(`Invalid base64 PDF data: ${error.message}`);
   }
 
-  async sendEmail(data: {
-    from: string;
-    to: string;
-    subject: string;
-    html: string;
-    pdfBase64: string;
-    filename: string;
-  }): Promise<void> {
-    if (!this.conn) throw new Error('Not connected to SMTP server');
+  // Generate filename
+  const safeName = emailData.participant_name.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_');
+  const timestamp = new Date().toISOString().split('T')[0];
+  const filename = `${safeName}_Certificate_${timestamp}.pdf`;
 
-    console.log(`📧 Sending email from ${data.from} to ${data.to}`);
-    
-    // EHLO
-    await this.sendCommand('EHLO', this.config.hostname);
-    
-    // Auth
-    await this.sendCommand('AUTH', 'LOGIN');
-    await this.sendCommand(btoa(this.config.username));
-    await this.sendCommand(btoa(this.config.password));
-    console.log('✅ Authentication successful');
-    
-    // Mail transaction
-    const fromEmail = data.from.includes('<') ? 
-      data.from.match(/<(.+?)>/)?.[1] || data.from : data.from;
-    await this.sendCommand('MAIL', `FROM:<${fromEmail}>`);
-    await this.sendCommand('RCPT', `TO:<${data.to}>`);
-    await this.sendCommand('DATA');
-    
-    // Send email content
-    const emailContent = this.buildMimeMessage(data);
-    console.log(`📦 Sending email content (${emailContent.length} chars)`);
-    
-    await this.conn.write(this.encoder.encode(emailContent));
-    await this.conn.write(this.encoder.encode('\r\n.\r\n'));
-    
-    const response = await this.readResponse();
-    console.log('📨 Final response:', response);
-    
-    if (!response.startsWith('250')) {
-      throw new Error(`Email sending failed: ${response}`);
-    }
-    
-    console.log('🎉 Email sent successfully!');
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.conn) {
-      try {
-        await this.sendCommand('QUIT');
-      } catch (e) {
-        console.warn('QUIT failed:', e);
-      }
-      this.conn.close();
-      this.conn = null;
-      console.log('🔌 Disconnected');
-    }
-  }
-
-  private async sendCommand(command: string, parameter?: string): Promise<void> {
-    if (!this.conn) throw new Error('Not connected');
-    
-    const fullCommand = parameter ? `${command} ${parameter}` : command;
-    const isCredential = command.includes(btoa(this.config.username)) || 
-                        command.includes(btoa(this.config.password));
-    
-    console.log('📤 SMTP >', isCredential ? '[CREDENTIAL]' : fullCommand);
-    
-    await this.conn.write(this.encoder.encode(fullCommand + '\r\n'));
-    
-    const response = await this.readResponse();
-    console.log('📥 SMTP <', response.substring(0, 100));
-  }
-
-  private async readResponse(): Promise<string> {
-    if (!this.conn) throw new Error('Not connected');
-    
-    const buffer = new Uint8Array(4096);
-    let response = '';
-    let attempts = 0;
-    
-    while (attempts < 20) {
-      const n = await this.conn.read(buffer);
-      if (n === null) break;
-      
-      const chunk = this.decoder.decode(buffer.subarray(0, n));
-      response += chunk;
-      
-      // Check for complete response (status code followed by space)
-      const lines = response.split('\r\n');
-      for (const line of lines) {
-        if (line && /^\d{3} /.test(line)) {
-          return response.trim();
-        }
-      }
-      
-      attempts++;
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    
-    return response.trim();
-  }
-
-  private buildMimeMessage(data: {
-    from: string;
-    to: string;
-    subject: string;
-    html: string;
-    pdfBase64: string;
-    filename: string;
-  }): string {
-    const boundary = `----=NextPart_${Date.now()}_${Math.random().toString(36)}`;
-    
-    console.log(`📄 Building MIME message with boundary: ${boundary}`);
-    console.log(`📄 PDF data length: ${data.pdfBase64.length} chars`);
-    console.log(`📄 Using filename: ${data.filename}`);
-    
-    // MINIMAL base64 cleaning to prevent corruption
-    let cleanBase64 = data.pdfBase64.trim();
-    
-    // Only remove line breaks and tabs, preserve all valid base64 characters
-    cleanBase64 = cleanBase64.replace(/[\r\n\t]/g, '');
-    
-    // Validate base64 format without aggressive cleaning
-    if (!/^[A-Za-z0-9+/]+=*$/.test(cleanBase64)) {
-      console.error('❌ Invalid base64 data detected');
-      throw new Error('Invalid base64 certificate data');
-    }
-    
-    // RFC 2045 compliant line wrapping - split into 76-character lines
-    const base64Lines = cleanBase64.match(/.{1,76}/g) || [];
-    const formattedBase64 = base64Lines.join('\r\n');
-    
-    // Create proper MIME message with correct headers
-    const messageId = `<${Date.now()}.${Math.random().toString(36)}@academicdigital.space>`;
-    const currentDate = new Date().toUTCString();
-    
-    return [
-      `Message-ID: ${messageId}`,
-      `Date: ${currentDate}`,
-      `From: ${data.from}`,
-      `To: ${data.to}`,
-      `Subject: ${data.subject}`,
-      'MIME-Version: 1.0',
-      `Content-Type: multipart/mixed; boundary="${boundary}"`,
-      'X-Mailer: Metascholar Certificate System',
-      '',
-      `This is a multi-part message in MIME format.`,
-      '',
-      `--${boundary}`,
-      'Content-Type: text/html; charset=utf-8',
-      'Content-Transfer-Encoding: quoted-printable',
-      '',
-      this.encodeQuotedPrintable(data.html),
-      '',
-      `--${boundary}`,
-      `Content-Type: application/pdf; name="${data.filename}"`,
-      `Content-Disposition: attachment; filename="${data.filename}"`,
-      `Content-Transfer-Encoding: base64`,
-      `Content-ID: <certificate_${Date.now()}>`,
-      '',
-      formattedBase64,
-      '',
-      `--${boundary}--`,
-      ''
-    ].join('\r\n');
-  }
-
-  private encodeQuotedPrintable(text: string): string {
-    return text
-      .replace(/[\u0080-\uFFFF]/g, (match) => {
-        const hex = match.charCodeAt(0).toString(16).toUpperCase();
-        return `=${hex.length === 1 ? '0' + hex : hex}`;
-      })
-      .replace(/=/g, '=3D')
-      .replace(/\r?\n/g, '\r\n')
-      .replace(/(.{75})/g, '$1=\r\n');
-  }
-}
-
-function generateEmailTemplate(data: {
-  participant_name: string;
-  message?: string;
-  certificate_number?: string;
-}): string {
-  return `
+  // Create email HTML content
+  const htmlContent = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -282,15 +109,15 @@ function generateEmailTemplate(data: {
         <h2>Certificate of Completion</h2>
     </div>
     <div class="content">
-        <p>Dear <strong>${data.participant_name}</strong>,</p>
+        <p>Dear <strong>${emailData.participant_name}</strong>,</p>
         
-        <p>${data.message || 'Congratulations on successfully completing the course! Your dedication and hard work have paid off.'}</p>
+        <p>${emailData.message || 'Congratulations on successfully completing the course! Your dedication and hard work have paid off.'}</p>
         
         <div class="certificate-info">
             <p><strong>🏆 Your certificate is now ready!</strong></p>
-            ${data.certificate_number ? `<p><strong>Certificate Number:</strong> ${data.certificate_number}</p>` : ''}
+            ${emailData.certificate_number ? `<p><strong>Certificate Number:</strong> ${emailData.certificate_number}</p>` : ''}
             <p><strong>📎 Your certificate is attached to this email as a PDF file.</strong></p>
-            <p>Look for the PDF attachment in your email client to download and save your certificate.</p>
+            <p>Look for the PDF attachment to download and save your certificate.</p>
         </div>
         
         <p>Please save this certificate for your records. You can print it or share it digitally as proof of your achievement.</p>
@@ -305,113 +132,93 @@ function generateEmailTemplate(data: {
         <p>© 2025 Metascholar Institute. All rights reserved.</p>
     </div>
 </body>
-</html>`.trim();
-}
+</html>`;
 
-async function sendEmailInBackground(emailData: EmailRequest): Promise<void> {
-  const smtpPassword = Deno.env.get('SMTP_PASSWORD');
-  if (!smtpPassword) {
-    console.error('❌ SMTP_PASSWORD not configured');
-    return;
-  }
-
-  console.log(`📧 [Background] Sending certificate to: ${emailData.to}`);
-  console.log(`👤 [Background] Participant: ${emailData.participant_name}`);
-
-  // Extract and validate PDF data from data URL
-  if (!emailData.certificate_url.startsWith('data:application/pdf;base64,')) {
-    console.error('❌ Invalid certificate URL format');
-    return;
-  }
-
-  const pdfBase64 = emailData.certificate_url.split(',')[1];
-  console.log(`📄 [Background] PDF base64 length: ${pdfBase64.length}`);
-
-  // Validate PDF data
-  if (pdfBase64.length < 100) {
-    console.error('❌ PDF data too small after cleaning');
-    return;
-  }
+  // Use NodeMailer-style approach with direct SMTP
+  const boundary = `----=NextPart_${Date.now()}_${Math.random().toString(36).substring(2)}`;
   
-  // Validate base64 format
-  if (!/^[A-Za-z0-9+/]+=*$/.test(pdfBase64)) {
-    console.error('❌ Invalid base64 format detected');
-    return;
-  }
+  // Create the email message with proper MIME structure
+  const emailMessage = [
+    `From: Metascholar Institute <support@academicdigital.space>`,
+    `To: ${emailData.to}`,
+    `Subject: ${emailData.subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/html; charset=utf-8`,
+    `Content-Transfer-Encoding: quoted-printable`,
+    ``,
+    htmlContent.replace(/[^\x00-\x7F]/g, (char) => 
+      `=${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`
+    ),
+    ``,
+    `--${boundary}`,
+    `Content-Type: application/pdf; name="${filename}"`,
+    `Content-Disposition: attachment; filename="${filename}"`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    base64Data.match(/.{1,76}/g)?.join('\r\n') || base64Data,
+    ``,
+    `--${boundary}--`
+  ].join('\r\n');
+
+  // Send via SMTP using direct TCP connection
+  let connection: Deno.TlsConn | null = null;
   
-  // Test decode to verify data integrity
   try {
-    const decodedSize = (pdfBase64.length * 3) / 4;
-    console.log(`📄 [Background] Expected decoded size: ${decodedSize} bytes`);
+    console.log('🔌 Connecting to SMTP server...');
+    connection = await Deno.connectTls({
+      hostname: 'smtp.titan.email',
+      port: 465,
+    });
+
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    // Helper function to read SMTP response
+    const readResponse = async (): Promise<string> => {
+      const buffer = new Uint8Array(4096);
+      const result = await connection!.read(buffer);
+      if (result === null) throw new Error('Connection closed');
+      return decoder.decode(buffer.subarray(0, result));
+    };
+
+    // Helper function to send SMTP command
+    const sendCommand = async (command: string): Promise<string> => {
+      console.log(`📤 SMTP: ${command.includes('AUTH') ? '[AUTH COMMAND]' : command}`);
+      await connection!.write(encoder.encode(command + '\r\n'));
+      const response = await readResponse();
+      console.log(`📥 SMTP: ${response.trim()}`);
+      return response;
+    };
+
+    // SMTP conversation
+    await readResponse(); // Server greeting
+    await sendCommand('EHLO academicdigital.space');
+    await sendCommand('AUTH LOGIN');
+    await sendCommand(btoa('support@academicdigital.space'));
+    await sendCommand(btoa(smtpPassword));
+    await sendCommand('MAIL FROM:<support@academicdigital.space>');
+    await sendCommand(`RCPT TO:<${emailData.to}>`);
+    await sendCommand('DATA');
     
-    if (decodedSize < 1000) {
-      console.error('❌ Decoded PDF too small, likely corrupted');
-      return;
+    // Send the actual email content
+    await connection.write(encoder.encode(emailMessage + '\r\n.\r\n'));
+    const finalResponse = await readResponse();
+    
+    if (!finalResponse.includes('250')) {
+      throw new Error(`Email sending failed: ${finalResponse}`);
     }
-  } catch (error) {
-    console.error('❌ Base64 decode test failed:', error);
-    return;
-  }
+    
+    await sendCommand('QUIT');
+    console.log('✅ Email sent successfully');
 
-  // Generate safe filename
-  const safeName = emailData.participant_name.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_');
-  const timestamp = new Date().toISOString().split('T')[0];
-  const filename = `${safeName}_Certificate_${timestamp}.pdf`;
-  
-  console.log(`📄 [Background] Generated filename: ${filename}`);
-
-  const smtpClient = new SimpleSMTPClient({
-    hostname: 'smtp.titan.email',
-    port: 465,
-    username: 'support@academicdigital.space',
-    password: smtpPassword,
-  });
-
-  const htmlContent = generateEmailTemplate({
-    participant_name: emailData.participant_name,
-    message: emailData.message,
-    certificate_number: emailData.certificate_number,
-  });
-
-  let attempt = 0;
-  const maxAttempts = 3;
-
-  while (attempt < maxAttempts) {
-    try {
-      attempt++;
-      console.log(`🔄 [Background] Attempt ${attempt}/${maxAttempts}`);
-      
-      await smtpClient.connect();
-      
-      // Final validation before sending
-      console.log(`📧 [Background] Final validation - PDF size: ${pdfBase64.length}, Filename: ${filename}`);
-      
-      await smtpClient.sendEmail({
-        from: 'Metascholar Institute - Workshop Certification <support@academicdigital.space>',
-        to: emailData.to,
-        subject: emailData.subject,
-        html: htmlContent,
-        pdfBase64: pdfBase64,
-        filename: filename,
-      });
-      
-      await smtpClient.disconnect();
-      
-      console.log(`✅ [Background] Email successfully sent to ${emailData.to}`);
-      return;
-      
-    } catch (error) {
-      console.error(`❌ [Background] Attempt ${attempt} failed:`, error);
-      await smtpClient.disconnect();
-      
-      if (attempt < maxAttempts) {
-        console.log('🔄 [Background] Retrying in 2 seconds...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
+  } finally {
+    if (connection) {
+      connection.close();
     }
   }
-  
-  console.error(`❌ [Background] All attempts failed for ${emailData.to}`);
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -430,15 +237,11 @@ const handler = async (req: Request): Promise<Response> => {
   try {
     const emailData: EmailRequest = await req.json();
     
-    // Enhanced logging for debugging
-    const urlPreview = emailData.certificate_url.substring(0, 50) + '...';
     console.log('📨 Certificate email request received:', {
       to: emailData.to,
       participant_name: emailData.participant_name,
       certificate_number: emailData.certificate_number,
-      certificate_url_length: emailData.certificate_url.length,
-      certificate_url_preview: urlPreview,
-      base64_data_length: emailData.certificate_url.split(',')[1]?.length || 0
+      certificate_url_length: emailData.certificate_url.length
     });
 
     // Validate required fields
@@ -458,26 +261,9 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    // Validate certificate URL format and content
-    if (!emailData.certificate_url.startsWith('data:application/pdf;base64,')) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid certificate URL format - must be a PDF data URL' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    // Validate base64 content exists and is substantial
-    const base64Content = emailData.certificate_url.split(',')[1];
-    if (!base64Content || base64Content.length < 100) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid or insufficient certificate data' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Start background email sending
-    sendEmailInBackground(emailData).catch(error => {
-      console.error('Background email sending failed:', error);
+    // Send email in background with proper error handling
+    sendCertificateEmail(emailData).catch(error => {
+      console.error('❌ Email sending failed:', error);
     });
 
     // Return immediate success response
@@ -493,7 +279,7 @@ const handler = async (req: Request): Promise<Response> => {
     );
 
   } catch (error) {
-    console.error('Request processing error:', error);
+    console.error('❌ Request processing error:', error);
     return new Response(
       JSON.stringify({ 
         error: 'Failed to process request',
