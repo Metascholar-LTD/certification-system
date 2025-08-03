@@ -219,7 +219,8 @@ async function sendParticipantEmailInBackground(emailData: {
     });
 
     if (emailResponse.error) {
-      throw new Error(`Resend API error: ${emailResponse.error.message}`);
+      console.error('❌ [Messaging] Resend API Error Details:', emailResponse.error);
+      throw new Error(`Resend API error: ${JSON.stringify(emailResponse.error)}`);
     }
 
     console.log('✅ [Messaging] Email sent successfully via Resend:', emailResponse.data?.id);
