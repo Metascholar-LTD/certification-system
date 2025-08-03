@@ -266,8 +266,8 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    // Send email in background with proper error handling
-    sendParticipantEmailInBackground({
+    // Start background email task using EdgeRuntime.waitUntil
+    EdgeRuntime.waitUntil(sendParticipantEmailInBackground({
       to,
       subject,
       content,
@@ -283,7 +283,7 @@ const handler = async (req: Request): Promise<Response> => {
         to: to,
         participant_name: participant_name
       });
-    });
+    }));
 
     // Return immediate success response
     return new Response(
