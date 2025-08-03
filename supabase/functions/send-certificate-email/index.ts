@@ -75,8 +75,9 @@ class TitanSMTPClient {
       await this.sendCommand(btoa(this.config.password), '', '235');
       console.log('✅ Authentication successful');
       
-      // MAIL FROM
-      await this.sendCommand('MAIL', `FROM:<${emailData.from}>`, '250');
+      // MAIL FROM - extract plain email address
+      const plainEmail = emailData.from.match(/<(.+)>/) ? emailData.from.match(/<(.+)>/)?.[1] : emailData.from;
+      await this.sendCommand('MAIL', `FROM:<${plainEmail}>`, '250');
       
       // RCPT TO
       await this.sendCommand('RCPT', `TO:<${emailData.to}>`, '250');
