@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { SmtpClient } from "./smtp-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,7 +15,7 @@ interface EmailRequest {
   certificate_url: string;
 }
 
-// Simplified email sending function
+// Email sending function using SmtpClient
 async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
   const smtpPassword = Deno.env.get('SMTP_PASSWORD');
   if (!smtpPassword) {
@@ -37,13 +38,9 @@ async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
     throw new Error('Certificate data appears to be corrupted or too small');
   }
 
-  // Convert base64 to binary for verification
-  let binaryData: Uint8Array;
+  // Verify PDF header
   try {
-    binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-    console.log(`📄 Binary data size: ${binaryData.length} bytes`);
-    
-    // Verify it's a valid PDF by checking PDF header
+    const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
     const pdfHeader = new TextDecoder().decode(binaryData.slice(0, 4));
     if (pdfHeader !== '%PDF') {
       throw new Error('Invalid PDF data - missing PDF header');
@@ -58,7 +55,7 @@ async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
   const timestamp = new Date().toISOString().split('T')[0];
   const filename = `${safeName}_Certificate_${timestamp}.pdf`;
 
-  // Create email HTML content
+  // Create HTML content
   const htmlContent = `
 <!DOCTYPE html>
 <html>
@@ -135,90 +132,35 @@ async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
 </body>
 </html>`;
 
-  // Use NodeMailer-style approach with direct SMTP
-  const boundary = `----=NextPart_${Date.now()}_${Math.random().toString(36).substring(2)}`;
-  
-  // Create the email message with proper MIME structure
-  const emailMessage = [
-    `From: Metascholar Institute <support@academicdigital.space>`,
-    `To: ${emailData.to}`,
-    `Subject: ${emailData.subject}`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/html; charset=utf-8`,
-    `Content-Transfer-Encoding: quoted-printable`,
-    ``,
-    htmlContent.replace(/[^\x00-\x7F]/g, (char) => 
-      `=${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`
-    ),
-    ``,
-    `--${boundary}`,
-    `Content-Type: application/pdf; name="${filename}"`,
-    `Content-Disposition: attachment; filename="${filename}"`,
-    `Content-Transfer-Encoding: base64`,
-    ``,
-    base64Data.match(/.{1,76}/g)?.join('\r\n') || base64Data,
-    ``,
-    `--${boundary}--`
-  ].join('\r\n');
+  // Use SmtpClient for reliable email sending
+  const smtpClient = new SmtpClient({
+    hostname: 'smtp.titan.email',
+    port: 465,
+    username: 'support@academicdigital.space',
+    password: smtpPassword,
+  });
 
-  // Send via SMTP using direct TCP connection
-  let connection: Deno.TlsConn | null = null;
-  
   try {
-    console.log('🔌 Connecting to SMTP server...');
-    connection = await Deno.connectTls({
-      hostname: 'smtp.titan.email',
-      port: 465,
+    console.log('🔌 Connecting to SMTP server via SmtpClient...');
+    await smtpClient.connect();
+    
+    console.log('📤 Sending email with PDF attachment...');
+    await smtpClient.sendEmail({
+      from: 'Metascholar Institute <support@academicdigital.space>',
+      to: emailData.to,
+      subject: emailData.subject,
+      html: htmlContent,
+      attachments: [{
+        filename: filename,
+        content: base64Data,
+        contentType: 'application/pdf',
+        encoding: 'base64'
+      }]
     });
-
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-
-    // Helper function to read SMTP response
-    const readResponse = async (): Promise<string> => {
-      const buffer = new Uint8Array(4096);
-      const result = await connection!.read(buffer);
-      if (result === null) throw new Error('Connection closed');
-      return decoder.decode(buffer.subarray(0, result));
-    };
-
-    // Helper function to send SMTP command
-    const sendCommand = async (command: string): Promise<string> => {
-      console.log(`📤 SMTP: ${command.includes('AUTH') ? '[AUTH COMMAND]' : command}`);
-      await connection!.write(encoder.encode(command + '\r\n'));
-      const response = await readResponse();
-      console.log(`📥 SMTP: ${response.trim()}`);
-      return response;
-    };
-
-    // SMTP conversation
-    await readResponse(); // Server greeting
-    await sendCommand('EHLO academicdigital.space');
-    await sendCommand('AUTH LOGIN');
-    await sendCommand(btoa('support@academicdigital.space'));
-    await sendCommand(btoa(smtpPassword));
-    await sendCommand('MAIL FROM:<support@academicdigital.space>');
-    await sendCommand(`RCPT TO:<${emailData.to}>`);
-    await sendCommand('DATA');
     
-    // Send the actual email content
-    await connection.write(encoder.encode(emailMessage + '\r\n.\r\n'));
-    const finalResponse = await readResponse();
-    
-    if (!finalResponse.includes('250')) {
-      throw new Error(`Email sending failed: ${finalResponse}`);
-    }
-    
-    await sendCommand('QUIT');
-    console.log('✅ Email sent successfully');
-
+    console.log('✅ Email sent successfully via SmtpClient');
   } finally {
-    if (connection) {
-      connection.close();
-    }
+    await smtpClient.disconnect();
   }
 }
 
