@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { SmtpClient } from "./smtp-client.ts";
+import { Resend } from "npm:resend@2.0.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,12 +15,12 @@ interface EmailRequest {
   certificate_url: string;
 }
 
-// Email sending function with PDF attachment support
+// Email sending function using Resend for reliable delivery
 async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
-  const smtpPassword = Deno.env.get('SMTP_PASSWORD');
-  if (!smtpPassword) {
-    console.error('❌ SMTP_PASSWORD not configured in environment variables');
-    throw new Error('SMTP_PASSWORD not configured');
+  const resendApiKey = Deno.env.get('RESEND_API_KEY');
+  if (!resendApiKey) {
+    console.error('❌ RESEND_API_KEY not configured in environment variables');
+    throw new Error('RESEND_API_KEY not configured');
   }
 
   console.log(`📧 Sending certificate to: ${emailData.to}`);
@@ -132,95 +132,33 @@ async function sendCertificateEmail(emailData: EmailRequest): Promise<void> {
 </body>
 </html>`;
 
-  // Create proper MIME email with PDF attachment
-  const boundary = `----=NextPart_${Date.now()}_${Math.random().toString(36).substring(2)}`;
-  
-  const emailMessage = [
-    `From: Metascholar Institute <support@academicdigital.space>`,
-    `To: ${emailData.to}`,
-    `Subject: ${emailData.subject}`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/html; charset=utf-8`,
-    `Content-Transfer-Encoding: 8bit`,
-    ``,
-    htmlContent,
-    ``,
-    `--${boundary}`,
-    `Content-Type: application/pdf; name="${filename}"`,
-    `Content-Disposition: attachment; filename="${filename}"`,
-    `Content-Transfer-Encoding: base64`,
-    ``,
-    ...base64Data.match(/.{1,76}/g) || [base64Data],
-    ``,
-    `--${boundary}--`
-  ].join('\r\n');
-
-  // Send via direct SMTP connection
-  let connection: Deno.TlsConn | null = null;
+  // Use Resend for reliable email delivery
+  const resend = new Resend(resendApiKey);
   
   try {
-    console.log('🔌 Connecting to SMTP server...');
-    connection = await Deno.connectTls({
-      hostname: 'smtp.titan.email',
-      port: 465,
+    console.log('📤 Sending email via Resend...');
+    const emailResponse = await resend.emails.send({
+      from: 'Metascholar Institute <onboarding@resend.dev>',
+      to: [emailData.to],
+      subject: emailData.subject,
+      html: htmlContent,
+      attachments: [
+        {
+          filename: filename,
+          content: base64Data,
+          contentType: 'application/pdf',
+        },
+      ],
     });
 
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-
-    // Helper function to read SMTP response
-    const readResponse = async (): Promise<string> => {
-      const buffer = new Uint8Array(8192); // Increased buffer size
-      const result = await connection!.read(buffer);
-      if (result === null) throw new Error('Connection closed unexpectedly');
-      return decoder.decode(buffer.subarray(0, result));
-    };
-
-    // Helper function to send SMTP command
-    const sendCommand = async (command: string): Promise<string> => {
-      console.log(`📤 SMTP: ${command.includes('AUTH') ? '[AUTH COMMAND]' : command}`);
-      await connection!.write(encoder.encode(command + '\r\n'));
-      const response = await readResponse();
-      console.log(`📥 SMTP: ${response.trim()}`);
-      return response;
-    };
-
-    // SMTP conversation
-    await readResponse(); // Server greeting
-    await sendCommand('EHLO academicdigital.space');
-    await sendCommand('AUTH LOGIN');
-    await sendCommand(btoa('support@academicdigital.space'));
-    await sendCommand(btoa(smtpPassword));
-    await sendCommand('MAIL FROM:<support@academicdigital.space>');
-    await sendCommand(`RCPT TO:<${emailData.to}>`);
-    await sendCommand('DATA');
-    
-    // Send the email content with attachment
-    console.log(`📤 Sending email content (${emailMessage.length} bytes)...`);
-    await connection.write(encoder.encode(emailMessage + '\r\n.\r\n'));
-    const finalResponse = await readResponse();
-    
-    if (!finalResponse.includes('250')) {
-      throw new Error(`Email sending failed: ${finalResponse}`);
+    if (emailResponse.error) {
+      throw new Error(`Resend API error: ${emailResponse.error.message}`);
     }
-    
-    await sendCommand('QUIT');
-    console.log('✅ Email with PDF attachment sent successfully');
 
+    console.log('✅ Email sent successfully via Resend:', emailResponse.data?.id);
   } catch (error) {
-    console.error('❌ SMTP Error:', error);
+    console.error('❌ Resend Email Error:', error);
     throw error;
-  } finally {
-    if (connection) {
-      try {
-        connection.close();
-      } catch (closeError) {
-        console.warn('Warning: Error closing connection:', closeError);
-      }
-    }
   }
 }
 
