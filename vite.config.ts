@@ -10,6 +10,14 @@ export default defineConfig(({ mode }) => ({
     port: 8080,
     historyApiFallback: true,
   },
+  build: {
+    outDir: "dist",
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
+    },
+  },
   plugins: [
     react(),
     mode === 'development' &&

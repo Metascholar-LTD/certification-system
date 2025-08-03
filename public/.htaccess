@@ -1,4 +1,16 @@
-Options -MultiViews
 RewriteEngine On
+RewriteBase /
+
+# Handle Angular and React Router
 RewriteCond %{REQUEST_FILENAME} !-f
-RewriteRule ^ index.html [QR,L]
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.html [L]
+
+# Handle static assets
+RewriteCond %{REQUEST_URI} !^/assets/
+RewriteCond %{REQUEST_URI} !^/static/
+RewriteCond %{REQUEST_URI} !^/favicon.ico
+RewriteCond %{REQUEST_URI} !^/robots.txt
+RewriteCond %{REQUEST_URI} !^/manifest.json
+RewriteCond %{REQUEST_URI} !^/.*\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$
+RewriteRule . /index.html [L]
