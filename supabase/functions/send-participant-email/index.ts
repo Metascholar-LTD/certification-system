@@ -216,7 +216,7 @@ async function sendParticipantEmailInBackground(emailData: {
     try {
       console.log(`📤 [Messaging] Sending email via Resend... (attempt ${retryCount + 1}/${maxRetries})`);
       const emailResponse = await resend.emails.send({
-        from: 'Metascholar Institute <onboarding@resend.dev>',
+        from: 'Metascholar Institute <support@academicdigital.space>',
         to: [emailData.to],
         subject: emailData.subject,
         html: htmlContent,
