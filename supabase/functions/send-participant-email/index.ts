@@ -206,27 +206,49 @@ async function sendParticipantEmailInBackground(emailData: {
 
   console.log(`📄 [Messaging] Generated email content: ${htmlContent.length} characters`);
 
-  // Use Resend for reliable email delivery
+  // Use Resend for reliable email delivery with retry logic
   const resend = new Resend(resendApiKey);
   
-  try {
-    console.log('📤 [Messaging] Sending email via Resend...');
-    const emailResponse = await resend.emails.send({
-      from: 'Metascholar Institute <onboarding@resend.dev>',
-      to: [emailData.to],
-      subject: emailData.subject,
-      html: htmlContent,
-    });
+  let retryCount = 0;
+  const maxRetries = 3;
+  
+  while (retryCount < maxRetries) {
+    try {
+      console.log(`📤 [Messaging] Sending email via Resend... (attempt ${retryCount + 1}/${maxRetries})`);
+      const emailResponse = await resend.emails.send({
+        from: 'Metascholar Institute <onboarding@resend.dev>',
+        to: [emailData.to],
+        subject: emailData.subject,
+        html: htmlContent,
+      });
 
-    if (emailResponse.error) {
-      console.error('❌ [Messaging] Resend API Error Details:', emailResponse.error);
-      throw new Error(`Resend API error: ${JSON.stringify(emailResponse.error)}`);
+      if (emailResponse.error) {
+        // Check if it's a rate limit error
+        if (emailResponse.error.name === 'rate_limit_exceeded') {
+          throw new Error('RATE_LIMIT');
+        }
+        console.error('❌ [Messaging] Resend API Error Details:', emailResponse.error);
+        throw new Error(`Resend API error: ${JSON.stringify(emailResponse.error)}`);
+      }
+
+      console.log('✅ [Messaging] Email sent successfully via Resend:', emailResponse.data?.id);
+      return; // Success - exit retry loop
+      
+    } catch (error) {
+      console.error(`❌ [Messaging] Attempt ${retryCount + 1} failed:`, error);
+      
+      retryCount++;
+      
+      if (retryCount < maxRetries) {
+        // Progressive delay: 2s, 4s, 8s for rate limits
+        const delay = error.message === 'RATE_LIMIT' ? 2000 * retryCount : 1000 * retryCount;
+        console.log(`⏳ [Messaging] Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        console.error(`💥 [Messaging] All ${maxRetries} attempts failed for ${emailData.to}`);
+        throw error;
+      }
     }
-
-    console.log('✅ [Messaging] Email sent successfully via Resend:', emailResponse.data?.id);
-  } catch (error) {
-    console.error('❌ [Messaging] Resend Email Error:', error);
-    throw error;
   }
 }
 
