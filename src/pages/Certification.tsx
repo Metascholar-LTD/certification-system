@@ -640,7 +640,8 @@ export default function Certification() {
                       <Button
                         onClick={sendAllCertificates}
                         disabled={sendingAll || participants.filter(p => certificates.find(c => c.registration_id === p.id)?.certificate_url && p.status !== 'sent').length === 0}
-                        className="bg-green-600 hover:bg-green-700 text-white"
+                        className="bg-green-600 hover:bg-green-700 text-white disabled:bg-gray-400 disabled:text-gray-200"
+                        variant={participants.filter(p => certificates.find(c => c.registration_id === p.id)?.certificate_url && p.status !== 'sent').length === 0 ? "outline" : "default"}
                       >
                         {sendingAll ? (
                           <>
@@ -651,6 +652,9 @@ export default function Certification() {
                           <>
                             <Send className="w-4 h-4 mr-2" />
                             Send All Certificates
+                            {participants.filter(p => certificates.find(c => c.registration_id === p.id)?.certificate_url && p.status !== 'sent').length === 0 && (
+                              <span className="text-xs ml-1">(No certificates ready)</span>
+                            )}
                           </>
                         )}
                       </Button>
