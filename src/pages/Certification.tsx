@@ -18,7 +18,8 @@ import {
   AlertCircle,
   Home,
   RefreshCw,
-  Eye
+  Eye,
+  Send
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
@@ -56,6 +57,7 @@ export default function Certification() {
   }[]>([]);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
   const [sendingFor, setSendingFor] = useState<string | null>(null);
+  const [sendingAll, setSendingAll] = useState(false);
 
   // Fetch webhook registrations from database
   const fetchWebhookRegistrations = async () => {
@@ -378,10 +380,143 @@ export default function Certification() {
     }
   };
 
+  // Send all certificates at once
+  const sendAllCertificates = async () => {
+    setSendingAll(true);
+    
+    try {
+      console.log('📧 [Debug] Starting bulk certificate sending...');
+      
+      // Get all participants with uploaded certificates that haven't been sent yet
+      const participantsToSend = participants.filter(participant => {
+        const certificate = certificates.find(cert => cert.registration_id === participant.id);
+        return certificate?.certificate_url && participant.status !== 'sent';
+      });
+      
+      if (participantsToSend.length === 0) {
+        toast({
+          title: "No Certificates to Send",
+          description: "All certificates have already been sent or no certificates are uploaded.",
+          variant: "destructive",
+        });
+        return;
+      }
 
+      console.log(`📧 [Debug] Found ${participantsToSend.length} certificates to send`);
+      
+      let successCount = 0;
+      let failureCount = 0;
+      const failures: string[] = [];
 
+      // Send certificates sequentially to avoid overwhelming the email service
+      for (const participant of participantsToSend) {
+        try {
+          const certificate = certificates.find(cert => cert.registration_id === participant.id);
+          
+          if (!certificate?.certificate_url) {
+            console.log(`📧 [Debug] Skipping ${participant.name} - no certificate found`);
+            continue;
+          }
+          
+          // Validate certificate data before sending
+          if (!certificate.certificate_url.startsWith('data:application/pdf;base64,')) {
+            console.log(`📧 [Debug] Skipping ${participant.name} - invalid certificate format`);
+            failures.push(`${participant.name} (Invalid format)`);
+            failureCount++;
+            continue;
+          }
+          
+          const base64Data = certificate.certificate_url.split(',')[1];
+          if (!base64Data || base64Data.length < 100) {
+            console.log(`📧 [Debug] Skipping ${participant.name} - corrupted certificate data`);
+            failures.push(`${participant.name} (Corrupted data)`);
+            failureCount++;
+            continue;
+          }
 
+          console.log(`📧 [Debug] Sending certificate to ${participant.name}...`);
 
+          // Send email using Supabase Edge Function
+          const { data: emailResult, error: emailError } = await supabase.functions.invoke('send-certificate-email', {
+            body: {
+              to: participant.email,
+              subject: emailSubject,
+              message: emailMessage,
+              participant_name: participant.name,
+              certificate_number: certificate.certificate_number,
+              certificate_url: certificate.certificate_url
+            }
+          });
+
+          if (emailError) {
+            console.error(`📧 [Debug] Email sending error for ${participant.name}:`, emailError);
+            failures.push(`${participant.name} (${emailError.message})`);
+            failureCount++;
+            continue;
+          }
+
+          console.log(`📧 [Debug] Email sent successfully to ${participant.name}`);
+
+          // Update certificate status to sent
+          const { error: updateError } = await supabase
+            .from('certificates')
+            .update({ 
+              status: 'sent', 
+              sent_at: new Date().toISOString() 
+            })
+            .eq('id', certificate.id);
+
+          if (updateError) {
+            console.error(`📧 [Debug] Error updating certificate status for ${participant.name}:`, updateError);
+            // Don't count this as a failure since the email was sent
+          }
+
+          successCount++;
+          
+          // Add a small delay between sends to be respectful to the email service
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+        } catch (error) {
+          console.error(`📧 [Debug] Error sending certificate to ${participant.name}:`, error);
+          failures.push(`${participant.name} (${error instanceof Error ? error.message : 'Unknown error'})`);
+          failureCount++;
+        }
+      }
+
+      // Show results
+      if (successCount > 0 && failureCount === 0) {
+        toast({
+          title: "All Certificates Sent Successfully! 🎉",
+          description: `Successfully sent ${successCount} certificates to participants.`,
+        });
+      } else if (successCount > 0 && failureCount > 0) {
+        toast({
+          title: `Partial Success: ${successCount} Sent, ${failureCount} Failed`,
+          description: `Successfully sent: ${successCount}. Failed: ${failures.join(', ')}`,
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "All Certificates Failed to Send",
+          description: `Failed to send certificates: ${failures.join(', ')}`,
+          variant: "destructive",
+        });
+      }
+      
+      // Refresh data to update the UI
+      await fetchWebhookRegistrations();
+      
+    } catch (error) {
+      console.error('📧 [Debug] Bulk certificate sending error:', error);
+      toast({
+        title: "Bulk Send Failed",
+        description: error instanceof Error ? error.message : "Failed to send certificates. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSendingAll(false);
+    }
+  };
 
   const getStatusBadge = (status: Participant['status']) => {
     switch (status) {
@@ -482,10 +617,45 @@ export default function Certification() {
             ) : participants.length > 0 ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>Individual Certificate Management</CardTitle>
-                  <CardDescription>
-                    Upload and send certificates for each participant individually.
-                  </CardDescription>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Individual Certificate Management</CardTitle>
+                      <CardDescription>
+                        Upload and send certificates for each participant individually.
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* Ready to Send Count */}
+                      {(() => {
+                        const readyToSend = participants.filter(p => certificates.find(c => c.registration_id === p.id)?.certificate_url && p.status !== 'sent').length;
+                        return readyToSend > 0 && (
+                          <div className="text-sm text-muted-foreground bg-blue-50 px-3 py-1 rounded-full border">
+                            <Award className="w-3 h-3 inline mr-1" />
+                            {readyToSend} ready to send
+                          </div>
+                        );
+                      })()}
+                      
+                      {/* Send All Button */}
+                      <Button
+                        onClick={sendAllCertificates}
+                        disabled={sendingAll || participants.filter(p => certificates.find(c => c.registration_id === p.id)?.certificate_url && p.status !== 'sent').length === 0}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {sendingAll ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                            Sending All...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-4 h-4 mr-2" />
+                            Send All Certificates
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
